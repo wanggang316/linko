@@ -366,12 +366,16 @@ final class AppState: ObservableObject {
     /// and restarts the core if it is running. Returns parser warnings.
     func importSubscription(urlString: String) async throws -> [String] {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard
-            let url = URL(string: trimmed),
-            let scheme = url.scheme?.lowercased(),
-            scheme == "http" || scheme == "https"
-        else {
-            throw AppError(message: "订阅地址无效，请输入 http(s) 链接。")
+        let url: URL
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
+            url = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath)
+        } else if
+            let parsed = URL(string: trimmed),
+            let scheme = parsed.scheme?.lowercased(),
+            scheme == "http" || scheme == "https" || scheme == "file" {
+            url = parsed
+        } else {
+            throw AppError(message: "订阅地址无效，请输入 http(s) 链接或本地文件路径。")
         }
         let data: Data
         do {
@@ -393,7 +397,7 @@ final class AppState: ObservableObject {
         }
 
         var subscription = LinkoKit.Subscription(
-            name: url.host ?? "订阅",
+            name: url.host ?? url.deletingPathExtension().lastPathComponent,
             url: url,
             lastUpdated: Date(),
             nodes: result.nodes
