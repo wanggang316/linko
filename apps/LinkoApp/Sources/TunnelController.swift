@@ -40,6 +40,11 @@ final class TunnelController: ObservableObject {
     /// KVO-ish status observation token for `NEVPNStatusDidChange`.
     private var statusObserver: NSObjectProtocol?
 
+    /// Activates the packet-tunnel system extension. The provider can't load
+    /// until the extension is registered + approved, so this runs before any
+    /// `NETunnelProviderManager` work.
+    private let extensionInstaller = SystemExtensionInstaller()
+
     init() {}
 
     // MARK: - Derived state
@@ -103,8 +108,9 @@ final class TunnelController: ObservableObject {
     }
 
     /// Ensures a provider configuration is installed and enabled, creating one
-    /// if necessary, then saving it to preferences. The first install triggers
-    /// the one-time system-extension approval prompt on a real device.
+    /// if necessary, then saving it to preferences. Assumes the system extension
+    /// is already activated (see `SystemExtensionInstaller`); saving a VPN
+    /// configuration alone never installs the extension.
     @discardableResult
     func install() async throws -> NETunnelProviderManager {
         if manager == nil { await load() }
@@ -148,6 +154,10 @@ final class TunnelController: ObservableObject {
     /// `configContent` (the provider reads the option first, falling back to
     /// the file). Throws a localized error on any failure.
     func start(configJSON: String) async throws {
+        // Activate + register the system extension first. On a fresh machine
+        // this throws SystemExtensionError.needsApproval and shows the approval
+        // prompt; the user allows it in System Settings and toggles TUN again.
+        try await extensionInstaller.activate()
         try writeSharedConfig(configJSON)
         let mgr = try await install()
         guard let session = mgr.connection as? NETunnelProviderSession else {
