@@ -26,6 +26,9 @@ final class DashboardViewModel: ObservableObject {
     /// Live connections from the latest `/connections` snapshot, in wire order;
     /// the Connections table applies its own sort comparator on top.
     @Published private(set) var connections: [ClashConnection] = []
+    /// Per-application traffic rolled up from the latest `/connections` snapshot,
+    /// pre-sorted by descending total bytes for the native per-app (应用) view.
+    @Published private(set) var appTrafficStats: [AppTrafficStat] = []
     /// Cumulative downloaded bytes since the core started.
     @Published private(set) var totalDown: Int64 = 0
     /// Cumulative uploaded bytes since the core started.
@@ -233,6 +236,7 @@ final class DashboardViewModel: ObservableObject {
 
     private func resetLiveState() {
         connections = []
+        appTrafficStats = []
         trafficHistory = []
         nextSampleIndex = 0
         // Cumulative counters are meaningless once the core stops; zero them so
@@ -248,6 +252,7 @@ final class DashboardViewModel: ObservableObject {
         // Order is owned by the Table's sort comparator (ConnectionsView), which
         // defaults to newest-first; the snapshot is published unsorted.
         connections = snapshot.connections
+        appTrafficStats = AppTrafficAggregator.aggregate(snapshot)
         totalDown = snapshot.downloadTotal
         totalUp = snapshot.uploadTotal
         memory = snapshot.memory
