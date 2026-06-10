@@ -303,6 +303,35 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertNil(config["dns"])
     }
 
+    // MARK: - Proxy mode (inbound selection)
+
+    func testSystemProxyModeEmitsMixedInbound() throws {
+        var prefs = AppPreferences()
+        prefs.proxyMode = .systemProxy
+        let data = try builder.build(nodes: [ssNode("A")], preferences: prefs)
+        let config = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let inbounds = try XCTUnwrap(config["inbounds"] as? [[String: Any]])
+        XCTAssertEqual(inbounds.count, 1)
+        XCTAssertEqual(inbounds[0]["type"] as? String, "mixed")
+        XCTAssertEqual(inbounds[0]["listen_port"] as? Int, prefs.mixedPort)
+    }
+
+    func testTunModeEmitsTunInbound() throws {
+        var prefs = AppPreferences()
+        prefs.proxyMode = .tun
+        let data = try builder.build(nodes: [ssNode("A")], preferences: prefs)
+        let config = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let inbounds = try XCTUnwrap(config["inbounds"] as? [[String: Any]])
+        XCTAssertEqual(inbounds.count, 1)
+        let tun = inbounds[0]
+        XCTAssertEqual(tun["type"] as? String, "tun")
+        XCTAssertEqual(tun["auto_route"] as? Bool, true)
+        XCTAssertEqual(tun["stack"] as? String, "gvisor")
+        XCTAssertNotNil(tun["address"] as? [String])
+        // No mixed listen port in TUN mode.
+        XCTAssertNil(tun["listen_port"])
+    }
+
     func testFakeIPEmittedOnlyWhenEnabled() throws {
         let routing = RoutingConfig(
             dns: DNSConfig(

@@ -133,14 +133,7 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
         var config: [String: Any] = [
             "log": ["level": "info"],
-            "inbounds": [
-                [
-                    "type": "mixed",
-                    "tag": "mixed-in",
-                    "listen": "127.0.0.1",
-                    "listen_port": preferences.mixedPort,
-                ]
-            ],
+            "inbounds": [inbound(for: preferences)],
             "outbounds": groupOutbounds + nodeOutbounds + [direct],
             "route": routeResult.route,
             "experimental": [
@@ -163,6 +156,36 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
             withJSONObject: config,
             options: [.prettyPrinted, .sortedKeys]
         )
+    }
+
+    // MARK: - Inbound
+
+    /// The single inbound, chosen by proxy mode. System-proxy mode uses a local
+    /// `mixed` (SOCKS+HTTP) listener; TUN mode uses a `tun` inbound that captures
+    /// all traffic via a virtual interface (run inside the NetworkExtension).
+    private func inbound(for preferences: AppPreferences) -> [String: Any] {
+        switch preferences.proxyMode {
+        case .systemProxy:
+            return [
+                "type": "mixed",
+                "tag": "mixed-in",
+                "listen": "127.0.0.1",
+                "listen_port": preferences.mixedPort,
+            ]
+        case .tun:
+            // address/auto_route per sing-box 1.12+ (unified `address` array).
+            // The NetworkExtension supplies the tun fd via libbox; gVisor is the
+            // portable userspace stack. fake-ip DNS (when enabled) pairs here.
+            return [
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "mtu": 9000,
+                "auto_route": true,
+                "strict_route": true,
+                "stack": "gvisor",
+            ]
+        }
     }
 
     // MARK: - Legacy selector (empty-routing path)

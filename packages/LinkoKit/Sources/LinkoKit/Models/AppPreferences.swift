@@ -31,6 +31,10 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     /// reflects the user's intent across launches even before the service is
     /// queried. Not consulted by the core lifecycle.
     public var launchAtLogin: Bool
+    /// How traffic is intercepted: local system proxy (default) or TUN global
+    /// mode (M2, runs in a NetworkExtension). Defaults to `.systemProxy` so
+    /// preferences persisted before M2 keep the original behavior.
+    public var proxyMode: ProxyMode
 
     /// Minimum allowed auto-update interval; a too-short interval would hammer
     /// the subscription host.
@@ -45,7 +49,8 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         routing: RoutingConfig = .empty,
         subscriptionAutoUpdateEnabled: Bool = false,
         subscriptionAutoUpdateMinutes: Int = 60,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        proxyMode: ProxyMode = .systemProxy
     ) {
         self.mixedPort = Self.clampPort(mixedPort, fallback: 7890)
         self.clashAPIPort = Self.clampPort(clashAPIPort, fallback: 9090)
@@ -56,6 +61,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.subscriptionAutoUpdateEnabled = subscriptionAutoUpdateEnabled
         self.subscriptionAutoUpdateMinutes = Self.clampInterval(subscriptionAutoUpdateMinutes)
         self.launchAtLogin = launchAtLogin
+        self.proxyMode = proxyMode
     }
 
     public static let `default` = AppPreferences()
@@ -79,6 +85,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         ) ?? defaults.subscriptionAutoUpdateMinutes
         self.subscriptionAutoUpdateMinutes = Self.clampInterval(rawInterval)
         self.launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? defaults.launchAtLogin
+        self.proxyMode = try container.decodeIfPresent(ProxyMode.self, forKey: .proxyMode) ?? defaults.proxyMode
     }
 
     /// Clamps a port into the valid 1–65535 range, substituting `fallback`
