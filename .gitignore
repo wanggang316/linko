@@ -12,4 +12,3 @@ vendor/
 
 # SwiftPM
 .swiftpm/
-Package.resolved
