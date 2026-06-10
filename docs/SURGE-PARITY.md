@@ -37,7 +37,7 @@
 | url-test 自动测速 | urltest（url/interval/tolerance） | ✅ |
 | 策略组嵌套、多策略组 | selector/urltest 嵌套 | ✅ |
 | fallback / load-balance | 降级为 urltest（已标注） | ⚠️ 部分 |
-| WireGuard / SSH 策略 | endpoint / ssh outbound | ⏳ M4 |
+| WireGuard / SSH 策略 | endpoint / ssh outbound | ✅ |
 | Snell | — | ❌（Surge 私有协议） |
 
 ## 4. DNS
@@ -59,7 +59,7 @@
 | 实时流量速率 / 总量 / 内存 | /traffic | ✅ |
 | 日志查看 / 导出 | /logs | ✅ |
 | 延迟测试 | /proxies/{}/delay | ✅ |
-| 按 App/策略流量统计 | connections 聚合 | ⏳ M4 |
+| 按 App/策略流量统计 | connections 聚合 | ✅（应用 tab） |
 
 ## 6. HTTP 处理与调试（定位差异，非目标）
 
@@ -74,8 +74,8 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
 | **启动前配置校验（sing-box check 预检，拦截坏配置）** | ✅（超越 Surge 的安全网） |
 | 菜单栏 UI / Dashboard | ✅（原生 SwiftUI） |
 | 开机自启 | ✅（SMAppService） |
-| 多 Profile 切换 / 托管配置 | ⏳ M4 |
-| 自动更新（App 自身） | ⏳ M4（Sparkle，随签名公证） |
+| 多 Profile 切换 / 托管配置 | ✅（无损迁移 + 切换重启） |
+| 自动更新（App 自身） | 🟡 Sparkle 已集成，待发布服务器 + appcast |
 | CLI / HTTP API / URL Scheme | ⏳ M5 评估 |
 | Ponte 设备组网 | ❌ 非目标 |
 
@@ -87,4 +87,5 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
   规则导入、生产硬化（启动前配置预校验、多订阅管理 + 自动更新、连接搜索/过滤/关闭/详情、开机自启）。
 - **M2（进行中）**：TUN 全局模式 —— NetworkExtension System Extension + libbox 嵌入 sing-box，
   Developer ID 签名（保持 SIP 开启），首次启用需系统设置批准一次。
-- **M4**：多 Profile、WireGuard/SSH、Sparkle 自动更新、SUBNET 策略、按 App 流量统计。
+- **M4（已交付）**：WireGuard/SSH 出站、多 Profile、按 App 流量统计、Sparkle 自动更新（待发布基建）。
+- **剩余**：SUBNET 按网络环境切换、hosts 本地映射、fake-ip（随 TUN）、CLI/HTTP API/URL Scheme。
