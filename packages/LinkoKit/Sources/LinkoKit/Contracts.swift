@@ -140,16 +140,27 @@ public protocol ClashAPIProviding: Sendable {
 
 // MARK: - sing-box config generation
 
-/// Builds a complete sing-box 1.x JSON configuration:
-/// mixed inbound on 127.0.0.1:<mixedPort>, one outbound per node, a selector
-/// outbound tagged "proxy" (all node tags + "direct"), a direct outbound,
-/// `route.final = "proxy"`, and `experimental.clash_api` on
-/// 127.0.0.1:<clashAPIPort>.
+/// Builds a complete sing-box 1.x JSON configuration.
+///
+/// Baseline shape (empty `preferences.routing`): mixed inbound on
+/// 127.0.0.1:<mixedPort>, one outbound per node, a selector outbound tagged
+/// "proxy" (all node tags + "direct"), a direct outbound, `route.final =
+/// "proxy"`, and `experimental.clash_api` on 127.0.0.1:<clashAPIPort>.
+///
+/// When `preferences.routing` is populated the builder additionally emits:
+/// - one group outbound per `PolicyGroup` (selector / urltest), resolving
+///   member tags (nodes, nested groups, built-ins) and degrading
+///   fallback/load-balance to urltest;
+/// - `route.rules` from the enabled `RoutingRule`s (logical rules nested),
+///   each routed to its `target` outbound via `{action:"route", outbound:tag}`;
+/// - `route.rule_set` from referenced `RuleSetEntry`s;
+/// - `route.final` from `routing.finalTarget`;
+/// - a `dns` block when `routing.dns.isEnabled`.
 ///
 /// Implemented by `SingBoxConfigBuilder` (Sources/LinkoKit/SingBox/).
 public protocol SingBoxConfigBuilding {
-    /// Returns UTF-8 encoded JSON. Throws if `nodes` is empty or a node
-    /// cannot be represented in the sing-box schema.
+    /// Returns UTF-8 encoded JSON. Throws if `nodes` is empty or a node/rule/
+    /// group cannot be represented in the sing-box schema.
     func build(nodes: [ProxyNode], preferences: AppPreferences) throws -> Data
 
     /// Returns the outbound tag `build` assigns to each node, positionally
@@ -157,6 +168,49 @@ public protocol SingBoxConfigBuilding {
     /// them), so every Clash API call must address nodes by this tag, never
     /// by the raw display name.
     func outboundTags(for nodes: [ProxyNode]) -> [String]
+
+    /// Validates that `preferences.routing` is internally consistent against
+    /// the given nodes (every rule/group/DNS target resolves to a known node
+    /// tag, group, or built-in; no group cycles; rule-set references exist).
+    /// Returns human-readable warnings for soft problems (unresolved targets
+    /// are dropped, degraded group types) without throwing. Hard errors that
+    /// would prevent `build` from succeeding are thrown instead.
+    func validate(nodes: [ProxyNode], routing: RoutingConfig) throws -> [String]
+}
+
+// MARK: - Rule import (Surge / Clash migration)
+
+/// Outcome of importing a `[Rule]`/`rules:` section: the parsed rules plus
+/// per-line warnings for entries that were skipped or only partially mapped.
+public struct RuleImportResult: Equatable, Sendable {
+    public let rules: [RoutingRule]
+    /// Policy names referenced by the imported rules, in first-seen order.
+    /// The caller maps these to existing group/node tags (by name) and warns
+    /// on any that do not resolve.
+    public let referencedPolicies: [String]
+    public let warnings: [String]
+
+    public init(rules: [RoutingRule], referencedPolicies: [String] = [], warnings: [String] = []) {
+        self.rules = rules
+        self.referencedPolicies = referencedPolicies
+        self.warnings = warnings
+    }
+}
+
+/// Parses an existing Surge profile `[Rule]` section or a Clash `rules:` list
+/// into `RoutingRule`s on a best-effort basis. Unsupported rule kinds are
+/// skipped with a warning rather than throwing.
+///
+/// Implemented by `RuleImporter` (Sources/LinkoKit/Routing/).
+public protocol RuleImporting {
+    /// Parses the lines of a Surge `[Rule]` section (e.g.
+    /// "DOMAIN-SUFFIX,google.com,Proxy"). Targets become rule `target`s by name.
+    func importSurgeRules(_ text: String) -> RuleImportResult
+
+    /// Parses a Clash YAML `rules:` list (e.g.
+    /// "- DOMAIN-SUFFIX,google.com,Proxy"), accepting either the full document
+    /// or just the rule lines.
+    func importClashRules(_ text: String) -> RuleImportResult
 }
 
 // MARK: - Subscription parsing

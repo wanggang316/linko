@@ -13,19 +13,25 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var selectedNodeID: UUID?
     /// URL used for node delay testing through the Clash API.
     public var delayTestURL: String
+    /// User-defined routing layer: rules, policy groups, rule-sets, DNS, and
+    /// the default outbound. Defaults to `.empty`, which reproduces the pre-M3
+    /// single-selector behavior, so configs persisted before M3 still load.
+    public var routing: RoutingConfig
 
     public init(
         mixedPort: Int = 7890,
         clashAPIPort: Int = 9090,
         singBoxBinaryPathOverride: String? = nil,
         selectedNodeID: UUID? = nil,
-        delayTestURL: String = "http://www.gstatic.com/generate_204"
+        delayTestURL: String = "http://www.gstatic.com/generate_204",
+        routing: RoutingConfig = .empty
     ) {
         self.mixedPort = mixedPort
         self.clashAPIPort = clashAPIPort
         self.singBoxBinaryPathOverride = singBoxBinaryPathOverride
         self.selectedNodeID = selectedNodeID
         self.delayTestURL = delayTestURL
+        self.routing = routing
     }
 
     public static let `default` = AppPreferences()
@@ -38,5 +44,6 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.singBoxBinaryPathOverride = try container.decodeIfPresent(String.self, forKey: .singBoxBinaryPathOverride)
         self.selectedNodeID = try container.decodeIfPresent(UUID.self, forKey: .selectedNodeID)
         self.delayTestURL = try container.decodeIfPresent(String.self, forKey: .delayTestURL) ?? defaults.delayTestURL
+        self.routing = try container.decodeIfPresent(RoutingConfig.self, forKey: .routing) ?? .empty
     }
 }
