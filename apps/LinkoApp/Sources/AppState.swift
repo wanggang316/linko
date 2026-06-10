@@ -456,6 +456,33 @@ final class AppState: ObservableObject {
         return nil
     }
 
+    // MARK: - Observability access (dashboard)
+
+    /// `true` while the core process is alive — the precondition for the Clash
+    /// API streams to carry data. The dashboard view model polls this to decide
+    /// whether to (re)subscribe.
+    var isCoreRunning: Bool {
+        coreRunner.isRunning
+    }
+
+    /// Builds a Clash API client bound to the live `clashAPIPort`, for callers
+    /// outside the lifecycle path (the dashboard's traffic/connections/logs
+    /// streams). Rebuild after the port changes; existing streams keep their
+    /// old client until restarted.
+    func makeClashAPIClient() -> ClashAPIProviding {
+        clashAPIClient()
+    }
+
+    // MARK: - Window helpers
+
+    /// Brings the app to the foreground and surfaces the given window. Required
+    /// because linko runs as an accessory app (`LSUIElement`), so a window must
+    /// be paired with an explicit activation to come to front from the menu.
+    func openWindow(id: String, using openWindow: (String) -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id)
+    }
+
     // MARK: - Private helpers
 
     private func clashAPIClient() -> ClashAPIProviding {
