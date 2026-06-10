@@ -114,6 +114,28 @@ public protocol ClashAPIProviding: Sendable {
 
     /// `GET /proxies/{nodeName}/delay?timeout=<ms>&url=<testURL>` -> delay in ms.
     func delay(nodeName: String, testURL: String, timeoutMilliseconds: Int) async throws -> Int
+
+    // MARK: Observability (dashboard)
+
+    /// `GET /connections` -> a single snapshot of all live connections plus
+    /// cumulative byte counters. Use for one-shot reads; prefer
+    /// `connectionsStream()` for a live view.
+    func connectionsSnapshot() async throws -> ClashConnectionsSnapshot
+
+    /// WebSocket `/connections` -> a snapshot pushed roughly once per second.
+    /// The stream finishes when the socket closes; cancelling the consuming
+    /// task tears the socket down. Frames that fail to decode are skipped.
+    func connectionsStream() -> AsyncThrowingStream<ClashConnectionsSnapshot, Error>
+
+    /// WebSocket `/traffic` -> per-second `{up, down}` byte deltas.
+    func trafficStream() -> AsyncThrowingStream<ClashTrafficTick, Error>
+
+    /// WebSocket `/logs?level=<level>` -> `{type, payload}` log lines.
+    func logsStream(level: ClashLogLevel) -> AsyncThrowingStream<ClashLogEntry, Error>
+
+    /// `DELETE /connections/{id}`, or `DELETE /connections` when `id` is `nil`
+    /// (closes every live connection).
+    func closeConnection(id: String?) async throws
 }
 
 // MARK: - sing-box config generation

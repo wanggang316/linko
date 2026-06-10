@@ -271,6 +271,75 @@ final class ClashAPIClientTests: XCTestCase {
         }
     }
 
+    // MARK: connections snapshot
+
+    func testConnectionsSnapshotBuildsGETRequestAndDecodes() async throws {
+        StubURLProtocol.stub = .init(
+            statusCode: 200,
+            body: Data(#"""
+                {
+                  "downloadTotal": 2048,
+                  "uploadTotal": 512,
+                  "memory": 1024,
+                  "connections": [
+                    {
+                      "id": "conn-1",
+                      "metadata": {
+                        "network": "tcp",
+                        "type": "mixed",
+                        "sourceIP": "127.0.0.1",
+                        "destinationIP": "1.1.1.1",
+                        "sourcePort": "50000",
+                        "destinationPort": "443",
+                        "host": "example.com",
+                        "dnsMode": "normal",
+                        "processPath": ""
+                      },
+                      "upload": 10,
+                      "download": 20,
+                      "start": "2026-06-10T10:00:00Z",
+                      "chains": ["proxy"],
+                      "rule": "final",
+                      "rulePayload": ""
+                    }
+                  ]
+                }
+                """#.utf8)
+        )
+
+        let snapshot = try await client.connectionsSnapshot()
+
+        let request = try XCTUnwrap(lastRequest)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:9090/connections")
+        XCTAssertEqual(snapshot.downloadTotal, 2048)
+        XCTAssertEqual(snapshot.uploadTotal, 512)
+        XCTAssertEqual(snapshot.connections.first?.id, "conn-1")
+        XCTAssertEqual(snapshot.connections.first?.metadata.destinationPort, "443")
+    }
+
+    // MARK: closeConnection
+
+    func testCloseConnectionByIDBuildsDeleteRequest() async throws {
+        StubURLProtocol.stub = .init(statusCode: 204, body: Data())
+
+        try await client.closeConnection(id: "conn-1")
+
+        let request = try XCTUnwrap(lastRequest)
+        XCTAssertEqual(request.httpMethod, "DELETE")
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:9090/connections/conn-1")
+    }
+
+    func testCloseConnectionWithNilClosesAllConnections() async throws {
+        StubURLProtocol.stub = .init(statusCode: 204, body: Data())
+
+        try await client.closeConnection(id: nil)
+
+        let request = try XCTUnwrap(lastRequest)
+        XCTAssertEqual(request.httpMethod, "DELETE")
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:9090/connections")
+    }
+
     func testNonJSONErrorBodyProducesEmptyMessage() async {
         StubURLProtocol.stub = .init(statusCode: 500, body: Data("boom".utf8))
 
