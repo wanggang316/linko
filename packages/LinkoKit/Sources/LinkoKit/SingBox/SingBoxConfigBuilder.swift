@@ -17,10 +17,20 @@ public enum SingBoxConfigError: Error, Equatable, LocalizedError {
 
 /// Builds a complete sing-box 1.x JSON configuration from proxy nodes and
 /// user preferences. See `SingBoxConfigBuilding` for the produced shape.
+///
+/// With an empty `preferences.routing` the output is byte-for-byte equivalent to
+/// the M1 baseline (mixed inbound, one outbound per node, a single "proxy"
+/// selector, a direct outbound, `route.final = "proxy"`). When routing is
+/// populated, the builder additionally emits policy-group outbounds, `route.rules`
+/// (including logical nesting and rule-sets), `route.rule_set`, `route.final`
+/// from `routing.finalTarget`, and a `dns` block when `routing.dns.isEnabled`.
 public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
     /// Tags reserved for non-node outbounds; node tags must never collide
     /// with these.
     private static let reservedTags: Set<String> = ["proxy", "direct"]
+
+    private let outboundBuilder = OutboundBuilder()
+    private let dnsBuilder = DNSBuilder()
 
     public init() {}
 
@@ -33,34 +43,95 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
         return nodes.map { uniqueTag(for: $0.name, used: &usedTags) }
     }
 
+    /// Validates `routing` against `nodes`: every rule/group/DNS/final target
+    /// must resolve to a node tag, a defined group, or a built-in ("direct"/
+    /// "proxy"); rule-set references must exist; group nesting must not cycle.
+    /// Soft problems return warnings; the config still builds (dropping the
+    /// offending pieces). There are currently no hard errors that throw here —
+    /// `build` itself throws only on missing node fields / empty node lists.
+    public func validate(nodes: [ProxyNode], routing: RoutingConfig) throws -> [String] {
+        var warnings: [String] = []
+        let nodeTags = outboundTags(for: nodes)
+        var resolvable = Set(nodeTags)
+        resolvable.formUnion(routing.groups.map(\.name))
+        resolvable.insert("direct")
+        resolvable.insert(PolicyGroup.defaultGroupName)
+        let ruleSetTags = Set(routing.ruleSets.map(\.tag))
+        let groupNames = Set(routing.groups.map(\.name))
+
+        // Rule targets + rule-set references.
+        validateRuleTargets(routing.rules, resolvable: resolvable, ruleSetTags: ruleSetTags, warnings: &warnings)
+
+        // Group membership + nesting cycles.
+        for group in routing.groups {
+            for member in group.members {
+                switch member.kind {
+                case .node where !nodeTags.contains(member.tag):
+                    warnings.append("策略组 “\(group.name)” 引用了未知节点 “\(member.tag)”。")
+                case .group where !groupNames.contains(member.tag):
+                    warnings.append("策略组 “\(group.name)” 引用了未知策略组 “\(member.tag)”。")
+                default:
+                    break
+                }
+            }
+        }
+        if let cycle = firstGroupCycle(in: routing.groups) {
+            warnings.append("策略组存在循环引用：\(cycle.joined(separator: " → "))。")
+        }
+
+        // Final target.
+        if !resolvable.contains(routing.finalTarget) {
+            warnings.append("route.final 目标 “\(routing.finalTarget)” 未找到。")
+        }
+
+        // DNS server tags referenced by DNS rules / final.
+        if routing.dns.isEnabled {
+            let serverTags = Set(routing.dns.servers.map(\.tag))
+            for rule in routing.dns.rules where rule.isEnabled {
+                if !serverTags.contains(rule.server) {
+                    warnings.append("DNS 规则引用了未知服务器 “\(rule.server)”。")
+                }
+            }
+            if let finalTag = routing.dns.finalServerTag, !finalTag.isEmpty, !serverTags.contains(finalTag) {
+                warnings.append("dns.final 引用了未知服务器 “\(finalTag)”。")
+            }
+        }
+
+        return warnings
+    }
+
     public func build(nodes: [ProxyNode], preferences: AppPreferences) throws -> Data {
         guard !nodes.isEmpty else {
             throw SingBoxConfigError.noNodes
         }
 
+        let routing = preferences.routing
         let nodeTags = outboundTags(for: nodes)
+
+        // Per-node outbounds and the selected tag.
         var nodeOutbounds: [[String: Any]] = []
         var selectedTag: String?
-
         for (node, tag) in zip(nodes, nodeTags) {
-            nodeOutbounds.append(try outbound(for: node, tag: tag))
+            nodeOutbounds.append(try outboundBuilder.outbound(for: node, tag: tag))
             if let selectedID = preferences.selectedNodeID, node.id == selectedID {
                 selectedTag = tag
             }
         }
 
-        var selector: [String: Any] = [
-            "type": "selector",
-            "tag": "proxy",
-            "outbounds": nodeTags + ["direct"],
-        ]
-        if let selectedTag {
-            selector["default"] = selectedTag
+        // Policy-group outbounds + the route block.
+        let route = RouteBuilder(routing: routing, nodeTags: nodeTags)
+        let routeResult = route.build(nodeTags: nodeTags, selectedTag: selectedTag)
+
+        // When no user groups exist, synthesize the legacy "proxy" selector over
+        // all nodes + direct so M1 behavior is preserved exactly.
+        var groupOutbounds = routeResult.groupOutbounds
+        if routing.groups.isEmpty {
+            groupOutbounds = [legacySelector(nodeTags: nodeTags, selectedTag: selectedTag)]
         }
 
         let direct: [String: Any] = ["type": "direct", "tag": "direct"]
 
-        let config: [String: Any] = [
+        var config: [String: Any] = [
             "log": ["level": "info"],
             "inbounds": [
                 [
@@ -70,8 +141,8 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
                     "listen_port": preferences.mixedPort,
                 ]
             ],
-            "outbounds": [selector] + nodeOutbounds + [direct],
-            "route": ["final": "proxy"],
+            "outbounds": groupOutbounds + nodeOutbounds + [direct],
+            "route": routeResult.route,
             "experimental": [
                 "clash_api": [
                     "external_controller": "127.0.0.1:\(preferences.clashAPIPort)"
@@ -79,85 +150,95 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
             ],
         ]
 
+        if let dnsResult = dnsBuilder.dnsResult(for: routing.dns) {
+            config["dns"] = dnsResult.dns
+            // sing-box 1.12+ requires an explicit resolver for outbound server
+            // domains once DNS is configured; point it at the bootstrap server.
+            var routeWithResolver = routeResult.route
+            routeWithResolver["default_domain_resolver"] = ["server": dnsResult.resolverTag]
+            config["route"] = routeWithResolver
+        }
+
         return try JSONSerialization.data(
             withJSONObject: config,
             options: [.prettyPrinted, .sortedKeys]
         )
     }
 
-    // MARK: - Outbounds
+    // MARK: - Legacy selector (empty-routing path)
 
-    private func outbound(for node: ProxyNode, tag: String) throws -> [String: Any] {
-        var outbound: [String: Any] = [
-            "type": node.protocolType.singBoxOutboundType,
-            "tag": tag,
-            "server": node.server,
-            "server_port": node.port,
+    private func legacySelector(nodeTags: [String], selectedTag: String?) -> [String: Any] {
+        var selector: [String: Any] = [
+            "type": "selector",
+            "tag": "proxy",
+            "outbounds": nodeTags + ["direct"],
         ]
-
-        switch node.protocolType {
-        case .shadowsocks:
-            outbound["method"] = try require(node.method, field: "method", node: node)
-            outbound["password"] = try require(node.password, field: "password", node: node)
-
-        case .vmess:
-            outbound["uuid"] = try require(node.uuid, field: "uuid", node: node)
-            outbound["security"] = "auto"
-            outbound["alter_id"] = node.alterId ?? 0
-            if node.tlsEnabled {
-                outbound["tls"] = tlsObject(for: node)
-            }
-
-        case .vless:
-            outbound["uuid"] = try require(node.uuid, field: "uuid", node: node)
-            if let flow = node.flow, !flow.isEmpty {
-                outbound["flow"] = flow
-            }
-            if node.tlsEnabled {
-                outbound["tls"] = tlsObject(for: node)
-            }
-
-        case .trojan:
-            outbound["password"] = try require(node.password, field: "password", node: node)
-            // Trojan always runs over TLS.
-            outbound["tls"] = tlsObject(for: node)
-
-        case .hysteria2:
-            outbound["password"] = try require(node.password, field: "password", node: node)
-            // Hysteria2 runs over QUIC, which always uses TLS.
-            outbound["tls"] = tlsObject(for: node)
-
-        case .tuic:
-            outbound["uuid"] = try require(node.uuid, field: "uuid", node: node)
-            if let password = node.password, !password.isEmpty {
-                outbound["password"] = password
-            }
-            // TUIC runs over QUIC, which always uses TLS.
-            outbound["tls"] = tlsObject(for: node)
+        if let selectedTag {
+            selector["default"] = selectedTag
         }
-
-        return outbound
+        return selector
     }
 
-    private func tlsObject(for node: ProxyNode) -> [String: Any] {
-        var tls: [String: Any] = ["enabled": true]
-        if let sni = node.sni, !sni.isEmpty {
-            tls["server_name"] = sni
+    // MARK: - Validation helpers
+
+    private func validateRuleTargets(
+        _ rules: [RoutingRule],
+        resolvable: Set<String>,
+        ruleSetTags: Set<String>,
+        warnings: inout [String]
+    ) {
+        for rule in rules where rule.isEnabled {
+            if !rule.type.isFinal, !resolvable.contains(rule.target) {
+                warnings.append("规则目标 “\(rule.target)” 未找到。")
+            }
+            if rule.type.usesRuleSet {
+                for tag in rule.value.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) })
+                where !tag.isEmpty && !ruleSetTags.contains(tag) {
+                    warnings.append("规则引用了未定义的规则集 “\(tag)”。")
+                }
+            }
+            if rule.type.isLogical {
+                validateRuleTargets(rule.subRules, resolvable: resolvable, ruleSetTags: ruleSetTags, warnings: &warnings)
+            }
         }
-        if node.allowInsecure {
-            tls["insecure"] = true
-        }
-        return tls
     }
 
-    // MARK: - Helpers
+    /// Detects the first cycle among `.group` members, returning the offending
+    /// chain of names, or `nil` when the membership graph is acyclic.
+    private func firstGroupCycle(in groups: [PolicyGroup]) -> [String]? {
+        let byName = Dictionary(groups.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        var state: [String: Int] = [:] // 0 = visiting, 1 = done
 
-    private func require(_ value: String?, field: String, node: ProxyNode) throws -> String {
-        guard let value, !value.isEmpty else {
-            throw SingBoxConfigError.missingField(node: node.name, field: field)
+        func visit(_ name: String, stack: [String]) -> [String]? {
+            if state[name] == 1 { return nil }
+            if state[name] == 0 {
+                // Found a back-edge: trim the stack to the cycle start.
+                if let idx = stack.firstIndex(of: name) {
+                    return Array(stack[idx...]) + [name]
+                }
+                return stack + [name]
+            }
+            state[name] = 0
+            if let group = byName[name] {
+                for member in group.members where member.kind == .group {
+                    if let cycle = visit(member.tag, stack: stack + [name]) {
+                        return cycle
+                    }
+                }
+            }
+            state[name] = 1
+            return nil
         }
-        return value
+
+        for group in groups {
+            if let cycle = visit(group.name, stack: []) {
+                return cycle
+            }
+        }
+        return nil
     }
+
+    // MARK: - Tagging
 
     /// Returns a tag for `name` that does not collide with reserved tags or
     /// previously assigned node tags, appending a numeric suffix when needed.
