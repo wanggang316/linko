@@ -18,6 +18,10 @@ struct AppDependencies {
     /// Builds a Clash API client for the given base URL. A factory is used
     /// because the API port is user-configurable at runtime.
     let makeClashAPI: (URL) -> ClashAPIProviding
+    /// Drives TUN global mode through the `LinkoTunnel` NetworkExtension
+    /// (M2). Only consulted in `.tun` proxy mode; `.systemProxy` mode never
+    /// touches it.
+    let tunnelController: TunnelController
 
     /// Production wiring backed by the concrete LinkoKit implementations.
     static func live() -> AppDependencies {
@@ -28,7 +32,8 @@ struct AppDependencies {
             subscriptionParser: SubscriptionParser(),
             configValidator: ConfigValidator(),
             loginItem: LoginItemService(),
-            makeClashAPI: { baseURL in ClashAPIClient(baseURL: baseURL) }
+            makeClashAPI: { baseURL in ClashAPIClient(baseURL: baseURL) },
+            tunnelController: TunnelController()
         )
     }
 }

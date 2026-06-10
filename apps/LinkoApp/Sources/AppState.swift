@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import LinkoKit
+import NetworkExtension
 
 /// A user-facing error carrying a localized (Chinese) message.
 struct AppError: LocalizedError {
@@ -23,6 +24,9 @@ final class AppState: ObservableObject {
     @Published private(set) var coreState: CoreState = .stopped
     @Published private(set) var isSystemProxyEnabled = false
     @Published private(set) var isSwitchingProxy = false
+    /// Live TUN tunnel status, mirrored from the NetworkExtension. Only
+    /// meaningful in `.tun` proxy mode; `.invalid`/`.disconnected` otherwise.
+    @Published private(set) var tunnelStatus: NEVPNStatus = .invalid
     @Published private(set) var isTestingDelays = false
     /// Last measured delay (ms) per node id; cleared when the core stops.
     @Published private(set) var nodeDelays: [UUID: Int] = [:]
@@ -38,6 +42,10 @@ final class AppState: ObservableObject {
     private let configValidator: ConfigValidating
     private let loginItem: LoginItemControlling
     private let makeClashAPI: (URL) -> ClashAPIProviding
+    /// TUN global mode controller (NetworkExtension). Only used in `.tun` mode.
+    let tunnelController: TunnelController
+    /// Mirrors `tunnelController.status` into `tunnelStatus`.
+    private var tunnelStatusObservation: AnyCancellable?
 
     // MARK: - Lifecycle serialization
 
@@ -76,6 +84,7 @@ final class AppState: ObservableObject {
         self.configValidator = dependencies.configValidator
         self.loginItem = dependencies.loginItem
         self.makeClashAPI = dependencies.makeClashAPI
+        self.tunnelController = dependencies.tunnelController
         self.supportDirectoryURL = supportDirectoryURL
 
         // Load persisted state. A *corrupt* file (present but undecodable) must
@@ -113,6 +122,20 @@ final class AppState: ObservableObject {
             }
         }
 
+        // Mirror the TUN tunnel status into our published mirror, and react to
+        // an extension-side disconnect (sleep/wake, manual stop, crash) so the
+        // UI and `isSystemProxyEnabled` flag stay truthful in `.tun` mode.
+        tunnelStatusObservation = tunnelController.$status
+            .receive(on: RunLoop.main)
+            .sink { [weak self] status in
+                guard let self else { return }
+                self.tunnelStatus = status
+                self.handleTunnelStatusChange(status)
+            }
+        // Pick up an already-installed provider configuration (so a previously
+        // approved extension is reflected and reusable without re-prompting).
+        Task { await tunnelController.load() }
+
         // Start the background subscription auto-update loop if the user had
         // it enabled in a previous session.
         rescheduleAutoUpdate()
@@ -138,18 +161,65 @@ final class AppState: ObservableObject {
         locateSingBoxBinary() != nil
     }
 
-    // MARK: - System proxy toggle
+    // MARK: - Proxy toggle (mode-aware)
 
+    /// The single on/off entry point for the menu switch, dispatched by the
+    /// active `proxyMode`. In `.systemProxy` mode this drives the sing-box
+    /// subprocess + macOS system proxy (the M1 path, untouched). In `.tun`
+    /// mode it drives the `LinkoTunnel` NetworkExtension instead — no
+    /// subprocess, no system-proxy mutation.
     func setSystemProxy(enabled: Bool) async {
-        guard !isSwitchingProxy, enabled != isSystemProxyEnabled else { return }
+        guard !isSwitchingProxy, enabled != isProxyActive else { return }
         await runSerializedLifecycle { [self] in
             // Re-check: a queued restart/toggle may have changed the state by
             // the time this operation runs.
-            guard enabled != isSystemProxyEnabled else { return }
-            if enabled {
+            guard enabled != isProxyActive else { return }
+            switch preferences.proxyMode {
+            case .systemProxy:
+                if enabled { await startProxying() } else { stopProxying() }
+            case .tun:
+                if enabled { await startTunnel() } else { await stopTunnel() }
+            }
+        }
+    }
+
+    /// Whether traffic is currently being intercepted in *either* mode. The
+    /// menu switch binds to this so it reflects the active mode's real state.
+    var isProxyActive: Bool {
+        switch preferences.proxyMode {
+        case .systemProxy: return isSystemProxyEnabled
+        case .tun: return tunnelController.isActive
+        }
+    }
+
+    // MARK: - Proxy mode switching
+
+    /// Switches the proxy interception mode. If a tunnel/proxy is currently
+    /// active, it is torn down in the old mode and brought back up in the new
+    /// one so the switch is seamless from the user's perspective. Persists the
+    /// new mode. All of this runs on the serialized lifecycle chain.
+    func setProxyMode(_ mode: ProxyMode) async {
+        guard preferences.proxyMode != mode else { return }
+        await runSerializedLifecycle { [self] in
+            guard preferences.proxyMode != mode else { return }
+            let wasActive = isProxyActive
+            // Tear down whatever the *current* mode has running.
+            switch preferences.proxyMode {
+            case .systemProxy:
+                if isSystemProxyEnabled { stopProxying() }
+            case .tun:
+                if tunnelController.isActive { await stopTunnelInternal() }
+            }
+            preferences.proxyMode = mode
+            persistPreferences()
+            lastErrorMessage = nil
+            // Bring the new mode up only if the user had it on before.
+            guard wasActive else { return }
+            switch mode {
+            case .systemProxy:
                 await startProxying()
-            } else {
-                stopProxying()
+            case .tun:
+                await startTunnel()
             }
         }
     }
@@ -249,6 +319,132 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Re-applies the generated config to whatever is currently running,
+    /// dispatched by mode. Called when a config-affecting change lands
+    /// (subscription import/removal that backs the selected node, a port
+    /// change, a failed selector update). A no-op when nothing is active.
+    ///
+    /// - `.systemProxy`: restarts the sing-box subprocess (the M1 behavior).
+    /// - `.tun`: hot-reloads the running tunnel in place via the extension's
+    ///   `handleAppMessage`; on reload failure it falls back to a full
+    ///   stop/start of the tunnel so the user is never left on a stale config.
+    private func reconfigureRunningProxy() async {
+        switch preferences.proxyMode {
+        case .systemProxy:
+            await restartProxying()
+        case .tun:
+            await runSerializedLifecycle { [self] in
+                guard tunnelController.isActive else { return }
+                let nodes = allNodes
+                guard !nodes.isEmpty,
+                      let configData = try? buildTunConfig(nodes: nodes),
+                      let configJSON = String(data: configData, encoding: .utf8)
+                else { return }
+                do {
+                    try await tunnelController.reload(configJSON: configJSON)
+                    await applySelectedNodeViaClashAPI()
+                } catch {
+                    // Reload failed; fall back to a clean restart of the tunnel.
+                    await stopTunnelInternal()
+                    await startTunnel()
+                }
+            }
+        }
+    }
+
+    // MARK: - TUN global mode (NetworkExtension)
+
+    /// Generates a validated `.tun` config and starts the `LinkoTunnel`
+    /// NetworkExtension. Mirrors `startProxying`'s safety contract: pre-flight
+    /// validation runs before the tunnel is touched, so a bad node/rule/DNS
+    /// block can never bring up a broken global tunnel. Never spawns the core
+    /// subprocess and never mutates the system proxy.
+    private func startTunnel() async {
+        lastErrorMessage = nil
+        let nodes = allNodes
+        guard !nodes.isEmpty else {
+            lastErrorMessage = "暂无可用节点，请先导入订阅。"
+            return
+        }
+        guard let binaryURL = locateSingBoxBinary() else {
+            coreState = .failed(reason: "sing-box binary not found")
+            lastErrorMessage = "未找到 sing-box：TUN 配置校验需要核心二进制，请在设置中指定路径或安装核心。"
+            return
+        }
+        if preferences.selectedNodeID == nil || selectedNode == nil {
+            preferences.selectedNodeID = nodes.first?.id
+            persistPreferences()
+        }
+        do {
+            // Build the .tun config (tun inbound + auto_route + gVisor) and run
+            // the same pre-flight `sing-box check` we use for system-proxy mode
+            // before handing it to the extension.
+            let configData = try buildTunConfig(nodes: nodes)
+            try writeConfigFile(data: configData)
+            let validator = configValidator
+            let configURL = configFileURL
+            let validation = await Task.detached {
+                validator.validate(configFileURL: configURL, binaryURL: binaryURL)
+            }.value
+            guard validation.isValid else {
+                coreState = .failed(reason: validation.errorSummary)
+                lastErrorMessage = "TUN 配置校验未通过，已阻止启动：\(validation.errorSummary)"
+                return
+            }
+            guard let configJSON = String(data: configData, encoding: .utf8) else {
+                lastErrorMessage = "TUN 配置编码失败。"
+                return
+            }
+            // Hands the JSON to the extension (App Group file + inline option)
+            // and starts the tunnel. The extension runs sing-box via libbox and
+            // calls back to configure the utun interface.
+            try await tunnelController.start(configJSON: configJSON)
+            // The Clash API is served from inside the extension on
+            // 127.0.0.1:<clashAPIPort>; reflect "running" so the dashboard and
+            // node selection use it. Actual readiness is confirmed when the
+            // tunnel reaches `.connected` (see handleTunnelStatusChange).
+            coreState = .running(pid: 0)
+            await applySelectedNodeViaClashAPI()
+        } catch {
+            coreState = .failed(reason: error.localizedDescription)
+            lastErrorMessage = "开启 TUN 全局模式失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// User-initiated stop of the TUN tunnel (serialized via the toggle path).
+    private func stopTunnel() async {
+        await stopTunnelInternal()
+    }
+
+    /// Stops the tunnel and resets derived state. Shared by `stopTunnel`,
+    /// mode-switching, and shutdown.
+    private func stopTunnelInternal() async {
+        tunnelController.stop()
+        coreState = .stopped
+        nodeDelays = [:]
+    }
+
+    /// Reacts to NetworkExtension status changes. An extension that disconnects
+    /// on its own (manual stop from System Settings, sleep/wake, a crash) must
+    /// be reflected in `coreState` so the menu doesn't claim the tunnel is up.
+    /// Only acts in `.tun` mode; ignored entirely in `.systemProxy` mode.
+    private func handleTunnelStatusChange(_ status: NEVPNStatus) {
+        guard preferences.proxyMode == .tun else { return }
+        switch status {
+        case .connected:
+            coreState = .running(pid: 0)
+        case .disconnected, .invalid:
+            // Don't clobber a `.failed` reason we set ourselves on a start error.
+            if case .failed = coreState { return }
+            coreState = .stopped
+            nodeDelays = [:]
+        case .connecting, .reasserting, .disconnecting:
+            break
+        @unknown default:
+            break
+        }
+    }
+
     /// Reacts to core state transitions reported by `CoreRunner` (hopped to
     /// the main actor and serialized with the other lifecycle operations).
     /// A core that dies while the system proxy is on must immediately release
@@ -275,9 +471,18 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Re-reads the core process state; called when the menu opens so a core
-    /// that died in the background is reflected (and the proxy restored).
+    /// Re-reads the active mode's state; called when the menu opens so a core
+    /// (or tunnel) that died in the background is reflected (and the system
+    /// proxy restored, in `.systemProxy` mode).
     func refreshCoreState() {
+        if preferences.proxyMode == .tun {
+            // The tunnel status is published live; mirror it so coreState
+            // tracks an extension-side disconnect even if the notification was
+            // missed while the popover was closed.
+            tunnelStatus = tunnelController.status
+            handleTunnelStatusChange(tunnelStatus)
+            return
+        }
         guard isSystemProxyEnabled || coreRunner.isRunning else { return }
         coreState = coreRunner.state
         if case .failed(let reason) = coreState, isSystemProxyEnabled {
@@ -307,6 +512,10 @@ final class AppState: ObservableObject {
             isSystemProxyEnabled = false
         }
         coreRunner.stop()
+        // Tear down the TUN tunnel too (no-op if not running). The extension
+        // also stops itself when the app process exits, but stopping
+        // explicitly restores the network promptly on a clean quit.
+        tunnelController.stop()
         coreState = .stopped
     }
 
@@ -331,15 +540,19 @@ final class AppState: ObservableObject {
         guard preferences.selectedNodeID != id else { return }
         preferences.selectedNodeID = id
         persistPreferences()
-        guard coreRunner.isRunning, let node = allNodes.first(where: { $0.id == id }) else { return }
+        // The Clash selector is reachable whenever the active mode is serving
+        // traffic: the subprocess in `.systemProxy` mode, or the in-extension
+        // sing-box (also on 127.0.0.1:<clashAPIPort>) in `.tun` mode.
+        guard isClashAPIReachable, let node = allNodes.first(where: { $0.id == id }) else { return }
         let api = clashAPIClient()
         let tag = outboundTag(for: node)
         Task {
             do {
                 try await api.select(selector: "proxy", nodeName: tag)
             } catch {
-                // Selector update failed; fall back to config regeneration + restart.
-                await self.restartProxying()
+                // Selector update failed; fall back to config regeneration +
+                // restart/reload of the active mode.
+                await self.reconfigureRunningProxy()
             }
         }
     }
@@ -470,11 +683,13 @@ final class AppState: ObservableObject {
             persistPreferences()
         }
 
-        // Only restart the core when this import can change what the running
-        // config routes through: it supplies the selected node. A refresh of
-        // an unrelated subscription leaves the running config untouched.
-        if isSystemProxyEnabled, importAffectsRunningConfig(updatedURL: url) {
-            await restartProxying()
+        // Only reconfigure the running proxy when this import can change what
+        // the running config routes through: it supplies the selected node. A
+        // refresh of an unrelated subscription leaves the running config
+        // untouched. Mode-aware: restarts the subprocess (.systemProxy) or
+        // hot-reloads the tunnel (.tun).
+        if isProxyActive, importAffectsRunningConfig(updatedURL: url) {
+            await reconfigureRunningProxy()
         }
         return result.warnings
     }
@@ -560,11 +775,11 @@ final class AppState: ObservableObject {
             preferences.selectedNodeID = SubscriptionStore.firstNodeID(in: subscriptions)
             persistPreferences()
         }
-        // Only restart when the removal actually changed what the running
-        // config routes through; removing an unrelated subscription is a no-op
-        // for the core.
-        if isSystemProxyEnabled, backedSelection {
-            await restartProxying()
+        // Only reconfigure when the removal actually changed what the running
+        // config routes through; removing an unrelated subscription is a no-op.
+        // Mode-aware (subprocess restart vs. tunnel reload).
+        if isProxyActive, backedSelection {
+            await reconfigureRunningProxy()
         }
     }
 
@@ -622,8 +837,17 @@ final class AppState: ObservableObject {
 
     // MARK: - Preferences
 
+    /// Updates non-mode preferences. A change to `proxyMode` must go through
+    /// `setProxyMode` (which handles teardown/bring-up); this method ignores a
+    /// `proxyMode` delta to avoid silently flipping modes without lifecycle
+    /// handling.
     func updatePreferences(_ newPreferences: AppPreferences) async {
         let old = preferences
+        guard old != newPreferences else { return }
+        var newPreferences = newPreferences
+        // Preserve the live mode: mode switches are handled exclusively by
+        // `setProxyMode`.
+        newPreferences.proxyMode = old.proxyMode
         guard old != newPreferences else { return }
         preferences = newPreferences
         persistPreferences()
@@ -631,7 +855,7 @@ final class AppState: ObservableObject {
             || old.clashAPIPort != newPreferences.clashAPIPort
             || old.singBoxBinaryPathOverride != newPreferences.singBoxBinaryPathOverride
         if coreAffecting {
-            await restartProxying()
+            await reconfigureRunningProxy()
         }
     }
 
@@ -659,11 +883,25 @@ final class AppState: ObservableObject {
 
     // MARK: - Observability access (dashboard)
 
-    /// `true` while the core process is alive — the precondition for the Clash
-    /// API streams to carry data. The dashboard view model polls this to decide
-    /// whether to (re)subscribe.
+    /// `true` while a sing-box instance is serving the Clash API — the
+    /// precondition for the dashboard streams to carry data. In `.systemProxy`
+    /// mode this is the subprocess; in `.tun` mode it is the in-extension
+    /// sing-box, alive once the tunnel is connected. The dashboard view model
+    /// polls this to decide whether to (re)subscribe.
     var isCoreRunning: Bool {
-        coreRunner.isRunning
+        isClashAPIReachable
+    }
+
+    /// Whether the active mode is currently serving the Clash API on
+    /// 127.0.0.1:<clashAPIPort>. Drives node selection, delay testing, and the
+    /// dashboard streams uniformly across both modes.
+    var isClashAPIReachable: Bool {
+        switch preferences.proxyMode {
+        case .systemProxy:
+            return coreRunner.isRunning
+        case .tun:
+            return tunnelStatus == .connected
+        }
     }
 
     /// Builds a Clash API client bound to the live `clashAPIPort`, for callers
@@ -692,9 +930,24 @@ final class AppState: ObservableObject {
     }
 
     private func writeConfigFile(nodes: [ProxyNode]) throws {
-        try ensureSupportDirectory()
         let data = try configBuilder.build(nodes: nodes, preferences: preferences)
+        try writeConfigFile(data: data)
+    }
+
+    /// Persists already-built config JSON to the support-directory config file
+    /// used as the pre-flight validation target.
+    private func writeConfigFile(data: Data) throws {
+        try ensureSupportDirectory()
         try data.write(to: configFileURL, options: .atomic)
+    }
+
+    /// Builds a `.tun`-mode sing-box config regardless of the persisted mode.
+    /// Used by the TUN start path (the mode is already `.tun` there, but this
+    /// makes the intent explicit and independent of caller ordering).
+    private func buildTunConfig(nodes: [ProxyNode]) throws -> Data {
+        var tunPreferences = preferences
+        tunPreferences.proxyMode = .tun
+        return try configBuilder.build(nodes: nodes, preferences: tunPreferences)
     }
 
     private func ensureSupportDirectory() throws {

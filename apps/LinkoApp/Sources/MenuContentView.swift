@@ -100,7 +100,7 @@ struct MenuContentView: View {
                         .foregroundStyle(proxyIconTint)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("系统代理")
+                    Text(appState.preferences.proxyMode.displayName)
                         .font(Theme.Font.bodyEmphasized)
                         .foregroundStyle(Theme.Color.label)
                     Text(proxyStateText)
@@ -122,12 +122,12 @@ struct MenuContentView: View {
         .padding(.horizontal, Theme.Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                .fill(appState.isSystemProxyEnabled ? Theme.Color.accent.opacity(0.12) : Theme.Color.hover.opacity(0.5))
+                .fill(appState.isProxyActive ? Theme.Color.accent.opacity(0.12) : Theme.Color.hover.opacity(0.5))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                 .strokeBorder(
-                    appState.isSystemProxyEnabled ? Theme.Color.accent.opacity(0.3) : Theme.Color.cardBorder,
+                    appState.isProxyActive ? Theme.Color.accent.opacity(0.3) : Theme.Color.cardBorder,
                     lineWidth: 1
                 )
         )
@@ -285,7 +285,7 @@ struct MenuContentView: View {
 
     private var proxyToggleBinding: Binding<Bool> {
         Binding(
-            get: { appState.isSystemProxyEnabled },
+            get: { appState.isProxyActive },
             set: { enabled in
                 Task { await appState.setSystemProxy(enabled: enabled) }
             }
@@ -308,6 +308,14 @@ struct MenuContentView: View {
     }
 
     private var coreSubtitle: String {
+        // In TUN mode the core runs inside the NetworkExtension (no app-side
+        // PID); surface the tunnel status instead of a meaningless PID.
+        if appState.preferences.proxyMode == .tun {
+            switch appState.coreState {
+            case .failed(let reason): return reason
+            default: return "TUN 模式 · \(appState.tunnelStatus.linkoLabel)"
+            }
+        }
         switch appState.coreState {
         case .stopped:
             return "核心已停止"
@@ -320,11 +328,16 @@ struct MenuContentView: View {
 
     private var proxyStateText: String {
         if appState.isSwitchingProxy { return "切换中…" }
-        return appState.isSystemProxyEnabled ? "已接管系统网络" : "未启用，流量直连"
+        switch appState.preferences.proxyMode {
+        case .systemProxy:
+            return appState.isProxyActive ? "已接管系统网络" : "未启用，流量直连"
+        case .tun:
+            return appState.isProxyActive ? "TUN 已接管全部流量" : "未启用，流量直连"
+        }
     }
 
     private var proxyIconTint: Color {
-        appState.isSystemProxyEnabled ? Theme.Color.accent : Theme.Color.inactive
+        appState.isProxyActive ? Theme.Color.accent : Theme.Color.inactive
     }
 
     private func rateText(_ bytesPerSecond: Int64) -> String {

@@ -12,6 +12,7 @@ struct SettingsView: View {
         Form {
             StatusSection()
             GeneralSection()
+            ModeSection()
             PortsSection()
             CoreSection()
             DelayTestSection()
@@ -137,6 +138,82 @@ private struct GeneralSection: View {
         case .notRegistered, .notFound:
             launchAtLogin = false
         }
+    }
+}
+
+// =============================================================================
+// MARK: - Proxy mode
+// =============================================================================
+
+/// Selects how traffic is intercepted: the local system proxy (M1) or TUN
+/// global mode (M2, runs inside a NetworkExtension system extension). Switching
+/// modes while the proxy is on tears down the old mode and brings up the new
+/// one through `AppState.setProxyMode`.
+private struct ModeSection: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        Section {
+            Picker(selection: modeBinding) {
+                ForEach(ProxyMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("代理模式")
+                        Text(modeDescription)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(Theme.Color.accent)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(appState.isSwitchingProxy)
+
+            if appState.preferences.proxyMode == .tun {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("首次启用需在系统设置中批准扩展")
+                            .foregroundStyle(Theme.Color.label)
+                        Text("系统设置 › 通用 › 登录项与扩展 › 网络扩展。批准后 TUN 会接管全部网络流量，覆盖不走系统代理的应用。")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } icon: {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .foregroundStyle(Theme.Color.warning)
+                }
+            }
+        } header: {
+            Text("代理模式")
+        } footer: {
+            Text("切换模式会在代理开启时自动迁移当前连接。")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.secondaryLabel)
+        }
+    }
+
+    private var modeDescription: String {
+        switch appState.preferences.proxyMode {
+        case .systemProxy:
+            return "仅接管遵循系统代理设置的应用"
+        case .tun:
+            return "虚拟网卡接管全部流量（全局）"
+        }
+    }
+
+    private var modeBinding: Binding<ProxyMode> {
+        Binding(
+            get: { appState.preferences.proxyMode },
+            set: { newMode in
+                Task { await appState.setProxyMode(newMode) }
+            }
+        )
     }
 }
 
