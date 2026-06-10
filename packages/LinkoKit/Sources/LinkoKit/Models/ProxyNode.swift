@@ -201,6 +201,16 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
     /// `plugin_opts` string. Built from Clash `plugin-opts` mapping.
     public var pluginOpts: String?
 
+    // MARK: WireGuard / SSH
+
+    /// WireGuard parameters; present (non-`nil`) only when `protocolType` is
+    /// `.wireguard`. The builder emits this node as a top-level `endpoints[]`
+    /// entry rather than an `outbound`. Optional so every other protocol — and
+    /// nodes persisted before this milestone — decode unchanged.
+    public var wireGuard: WireGuardConfig?
+    /// SSH parameters; present (non-`nil`) only when `protocolType` is `.ssh`.
+    public var ssh: SSHConfig?
+
     public init(
         id: UUID = UUID(),
         name: String,
@@ -218,7 +228,9 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
         tls: TLSOptions? = nil,
         transport: TransportOptions = .tcp,
         plugin: String? = nil,
-        pluginOpts: String? = nil
+        pluginOpts: String? = nil,
+        wireGuard: WireGuardConfig? = nil,
+        ssh: SSHConfig? = nil
     ) {
         self.id = id
         self.name = name
@@ -239,6 +251,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
         self.transport = transport
         self.plugin = plugin
         self.pluginOpts = pluginOpts
+        self.wireGuard = wireGuard
+        self.ssh = ssh
     }
 
     public init(from decoder: Decoder) throws {
@@ -264,5 +278,7 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
         self.transport = try c.decodeIfPresent(TransportOptions.self, forKey: .transport) ?? .tcp
         self.plugin = try c.decodeIfPresent(String.self, forKey: .plugin)
         self.pluginOpts = try c.decodeIfPresent(String.self, forKey: .pluginOpts)
+        self.wireGuard = try c.decodeIfPresent(WireGuardConfig.self, forKey: .wireGuard)
+        self.ssh = try c.decodeIfPresent(SSHConfig.self, forKey: .ssh)
     }
 }

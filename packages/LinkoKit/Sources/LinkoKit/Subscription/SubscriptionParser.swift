@@ -107,6 +107,10 @@ public struct SubscriptionParser: SubscriptionParsing {
             return try hysteria2Node(proxy, name: name, server: server, port: port)
         case .tuic:
             return try tuicNode(proxy, name: name, server: server, port: port)
+        case .wireguard:
+            return try wireguardNode(proxy, name: name, server: server, port: port)
+        case .ssh:
+            return try sshNode(proxy, name: name, server: server, port: port)
         }
     }
 
@@ -250,6 +254,82 @@ public struct SubscriptionParser: SubscriptionParsing {
             allowInsecure: tls.insecure,
             tls: tls,
             pluginOpts: tuicExtras(proxy)
+        )
+    }
+
+    // MARK: - WireGuard / SSH
+
+    /// Maps a Clash `type: wireguard` proxy into a WireGuard `ProxyNode`. Clash
+    /// keys: `private-key`, `public-key` (peer), `pre-shared-key`, `ip`/`ipv6`
+    /// (local addresses), `reserved`, `mtu`. Missing required keys skip the entry.
+    private func wireguardNode(
+        _ proxy: [String: Any], name: String, server: String, port: Int
+    ) throws -> ProxyNode {
+        guard let privateKey = string(proxy["private-key"]), !privateKey.isEmpty else {
+            throw EntryError(message: "Skipped \"\(name)\": wireguard entry missing \"private-key\".")
+        }
+        guard let peerPublicKey = string(proxy["public-key"]), !peerPublicKey.isEmpty else {
+            throw EntryError(message: "Skipped \"\(name)\": wireguard entry missing \"public-key\".")
+        }
+        var localAddresses = stringList(proxy["ip"]).map { normalizeWireGuardAddress($0) }
+        localAddresses.append(contentsOf: stringList(proxy["ipv6"]).map { normalizeWireGuardAddress($0) })
+        let preShared = string(proxy["pre-shared-key"])
+        let reserved = intList(proxy["reserved"])
+        let wg = WireGuardConfig(
+            privateKey: privateKey,
+            peerPublicKey: peerPublicKey,
+            preSharedKey: (preShared?.isEmpty ?? true) ? nil : preShared,
+            localAddresses: localAddresses,
+            reserved: reserved,
+            mtu: integer(proxy["mtu"])
+        )
+        return ProxyNode(
+            name: name,
+            protocolType: .wireguard,
+            server: server,
+            port: port,
+            wireGuard: wg
+        )
+    }
+
+    /// Normalizes a WireGuard interface address to a CIDR prefix. sing-box's
+    /// endpoint `address[]` is a `netip.Prefix` and REQUIRES a `/` suffix; many
+    /// Clash.Meta / WARP subscriptions store a bare IP (e.g. `10.0.0.2`). When no
+    /// prefix is present, append `/32` for IPv4 and `/128` for IPv6 so the
+    /// generated config passes pre-flight validation. A value that already
+    /// carries a prefix (or is not a recognizable bare IP) is returned unchanged.
+    private func normalizeWireGuardAddress(_ address: String) -> String {
+        let trimmed = address.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.contains("/") else { return trimmed }
+        // IPv6 addresses contain a colon; IPv4 does not.
+        let suffix = trimmed.contains(":") ? "/128" : "/32"
+        return trimmed + suffix
+    }
+
+    /// Maps a Clash `type: ssh` proxy into an SSH `ProxyNode`. Clash keys:
+    /// `username`, `password`, `private-key`, `private-key-passphrase`,
+    /// `host-key`, `host-key-algorithms`. A missing `username` skips the entry.
+    private func sshNode(
+        _ proxy: [String: Any], name: String, server: String, port: Int
+    ) throws -> ProxyNode {
+        guard let user = string(proxy["username"]) ?? string(proxy["user"]), !user.isEmpty else {
+            throw EntryError(message: "Skipped \"\(name)\": ssh entry missing \"username\".")
+        }
+        let ssh = SSHConfig(
+            user: user,
+            password: string(proxy["password"]),
+            privateKey: string(proxy["private-key"]),
+            privateKeyPath: string(proxy["private-key-path"]),
+            privateKeyPassphrase: string(proxy["private-key-passphrase"]),
+            hostKey: stringList(proxy["host-key"]),
+            hostKeyAlgorithms: stringList(proxy["host-key-algorithms"])
+        )
+        return ProxyNode(
+            name: name,
+            protocolType: .ssh,
+            server: server,
+            port: port,
+            ssh: ssh
         )
     }
 
@@ -464,6 +544,33 @@ public struct SubscriptionParser: SubscriptionParsing {
             }
         }
         return nil
+    }
+
+    /// Coerces a YAML sequence (or single scalar) into `[Int]`, dropping
+    /// non-integer elements. Used for WireGuard `reserved`.
+    ///
+    /// Clash/WARP entries commonly encode `reserved` as a base64 string holding
+    /// the three client-id bytes (e.g. `reserved: "AAAA"`) instead of an int
+    /// array. sing-box accepts both forms; decode such a string into the first
+    /// three bytes so the client-id is preserved (Cloudflare WARP needs it).
+    private func intList(_ value: Any?) -> [Int] {
+        if let array = value as? [Any] {
+            return array.compactMap { integer($0) }
+        }
+        if let single = value as? Int {
+            return [single]
+        }
+        if let raw = value as? String {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            // A plain integer string keeps its existing single-int meaning.
+            if let single = Int(trimmed) {
+                return [single]
+            }
+            if let data = Data(base64Encoded: trimmed), !data.isEmpty {
+                return data.prefix(3).map { Int($0) }
+            }
+        }
+        return []
     }
 
     /// Coerces a YAML scalar or sequence into `[String]`. Single scalars become

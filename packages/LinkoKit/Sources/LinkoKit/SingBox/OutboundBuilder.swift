@@ -59,9 +59,98 @@ struct OutboundBuilder {
             }
             // TUIC runs over QUIC, which always uses TLS.
             applyTLSIfNeeded(node, mandatory: true, into: &outbound)
+
+        case .ssh:
+            try applySSH(node, into: &outbound)
+
+        case .wireguard:
+            // WireGuard is a top-level `endpoint` in sing-box 1.11+, not an
+            // outbound; the config builder emits it via `endpointObject(for:)`
+            // into `endpoints[]`. It must never be produced here.
+            throw SingBoxConfigError.wireGuardIsEndpoint(node: node.name)
         }
 
         return outbound
+    }
+
+    // MARK: - SSH
+
+    /// Fills in the `ssh` outbound fields from `node.ssh`. Verified against
+    /// https://sing-box.sagernet.org/configuration/outbound/ssh/
+    private func applySSH(_ node: ProxyNode, into outbound: inout [String: Any]) throws {
+        guard let ssh = node.ssh else {
+            throw SingBoxConfigError.missingField(node: node.name, field: "ssh")
+        }
+        outbound["user"] = try require(ssh.user, field: "user", node: node)
+        if let password = ssh.password, !password.isEmpty {
+            outbound["password"] = password
+        }
+        if let key = ssh.privateKey, !key.isEmpty {
+            outbound["private_key"] = key
+        }
+        if let path = ssh.privateKeyPath, !path.isEmpty {
+            outbound["private_key_path"] = path
+        }
+        if let passphrase = ssh.privateKeyPassphrase, !passphrase.isEmpty {
+            outbound["private_key_passphrase"] = passphrase
+        }
+        if !ssh.hostKey.isEmpty {
+            outbound["host_key"] = ssh.hostKey
+        }
+        if !ssh.hostKeyAlgorithms.isEmpty {
+            outbound["host_key_algorithms"] = ssh.hostKeyAlgorithms
+        }
+        if let version = ssh.clientVersion, !version.isEmpty {
+            outbound["client_version"] = version
+        }
+    }
+
+    // MARK: - WireGuard endpoint
+
+    /// Builds the top-level `endpoints[]` entry for a WireGuard node. Verified
+    /// against https://sing-box.sagernet.org/configuration/endpoint/wireguard/
+    /// (WireGuard migrated from an outbound to an endpoint in sing-box 1.11+;
+    /// the `tag` stays referenceable by rules/groups exactly like an outbound).
+    func endpointObject(for node: ProxyNode, tag: String) throws -> [String: Any] {
+        guard let wg = node.wireGuard else {
+            throw SingBoxConfigError.missingField(node: node.name, field: "wireguard")
+        }
+        // sing-box accepts an empty interface address[] but the tunnel then
+        // routes nothing — a silent dead tunnel. Reject it at build time so the
+        // pre-flight validator surfaces it instead of failing invisibly.
+        let addresses = wg.localAddresses.filter { !$0.isEmpty }
+        guard !addresses.isEmpty else {
+            throw SingBoxConfigError.missingField(node: node.name, field: "wireguard.address")
+        }
+        var endpoint: [String: Any] = [
+            "type": node.protocolType.singBoxOutboundType,
+            "tag": tag,
+            "address": addresses,
+            "private_key": try require(wg.privateKey, field: "private_key", node: node),
+        ]
+        if let mtu = wg.mtu, mtu > 0 {
+            endpoint["mtu"] = mtu
+        }
+
+        var peer: [String: Any] = [
+            "address": node.server,
+            "port": node.port,
+            "public_key": try require(wg.peerPublicKey, field: "peer_public_key", node: node),
+        ]
+        if let psk = wg.preSharedKey, !psk.isEmpty {
+            peer["pre_shared_key"] = psk
+        }
+        // A peer with no allowed_ips would route nothing; default to catch-all.
+        peer["allowed_ips"] = ["0.0.0.0/0", "::/0"]
+        if let keepalive = wg.persistentKeepalive, keepalive > 0 {
+            peer["persistent_keepalive_interval"] = keepalive
+        }
+        if !wg.reserved.isEmpty {
+            peer["reserved"] = Array(wg.reserved.prefix(3))
+        }
+        endpoint["peers"] = [peer]
+
+        return endpoint
     }
 
     // MARK: - TLS

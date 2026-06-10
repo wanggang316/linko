@@ -4,6 +4,9 @@ import Foundation
 public enum SingBoxConfigError: Error, Equatable, LocalizedError {
     case noNodes
     case missingField(node: String, field: String)
+    /// A WireGuard node reached the outbound builder; it must be emitted as a
+    /// top-level `endpoints[]` entry instead (sing-box 1.11+).
+    case wireGuardIsEndpoint(node: String)
 
     public var errorDescription: String? {
         switch self {
@@ -11,6 +14,8 @@ public enum SingBoxConfigError: Error, Equatable, LocalizedError {
             return "Cannot build a sing-box config without any proxy nodes."
         case let .missingField(node, field):
             return "Node \"\(node)\" is missing the required field \"\(field)\"."
+        case let .wireGuardIsEndpoint(node):
+            return "WireGuard node \"\(node)\" must be emitted as an endpoint, not an outbound."
         }
     }
 }
@@ -108,11 +113,18 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
         let routing = preferences.routing
         let nodeTags = outboundTags(for: nodes)
 
-        // Per-node outbounds and the selected tag.
+        // Per-node outbounds (and WireGuard endpoints) plus the selected tag.
+        // WireGuard migrated to a top-level `endpoints[]` entry in sing-box
+        // 1.11+; its tag stays referenceable by rules/groups like any outbound.
         var nodeOutbounds: [[String: Any]] = []
+        var nodeEndpoints: [[String: Any]] = []
         var selectedTag: String?
         for (node, tag) in zip(nodes, nodeTags) {
-            nodeOutbounds.append(try outboundBuilder.outbound(for: node, tag: tag))
+            if node.protocolType.isEndpoint {
+                nodeEndpoints.append(try outboundBuilder.endpointObject(for: node, tag: tag))
+            } else {
+                nodeOutbounds.append(try outboundBuilder.outbound(for: node, tag: tag))
+            }
             if let selectedID = preferences.selectedNodeID, node.id == selectedID {
                 selectedTag = tag
             }
@@ -142,6 +154,11 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
                 ]
             ],
         ]
+
+        // WireGuard nodes live in the top-level `endpoints[]` array (1.11+).
+        if !nodeEndpoints.isEmpty {
+            config["endpoints"] = nodeEndpoints
+        }
 
         if let dnsResult = dnsBuilder.dnsResult(for: routing.dns) {
             config["dns"] = dnsResult.dns
