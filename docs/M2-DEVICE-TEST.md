@@ -15,6 +15,25 @@ CLI 自动签名只会生成 **Mac 开发**描述文件（期望非 `-systemexte
 与我们不匹配）。系统扩展的 **Developer ID** 描述文件目前只能由 Xcode 分发流程或开发者
 门户生成。下面用 Xcode GUI，一次走通。
 
+## ⚠️ 签名方式：手动 Developer ID（已在 project.yml 配好）
+自动签名会生成 Mac 开发描述文件（entitlement 值 `packet-tunnel-provider`），无法满足我们
+的 `packet-tunnel-provider-systemextension`（这点与官方 sing-box-for-apple 一致，已核对）。
+所以两个 target 改为**手动 Developer ID 签名**，需要先在门户创建两个 Developer ID 描述文件。
+
+### 0. 先创建两个 Developer ID 描述文件（一次性）
+去 [developer.apple.com](https://developer.apple.com/account/resources/profiles/list) →
+Certificates, Identifiers & Profiles → **Profiles** → 点 **+**：
+1. Profile 类型选 **Developer ID**（在 Distribution 分组下）→ 子类型选含系统扩展的那项 →
+   Continue。
+2. App ID 选 **com.gumpw.linko** → 选 Developer ID 证书（WANG GANG）→ 命名为
+   **`Linko DeveloperID`**（名字必须完全一致，project.yml 里按这个名字引用）→ Generate → Download。
+3. 重复一次，App ID 选 **com.gumpw.linko.tunnel** → 命名为 **`LinkoTunnel DeveloperID`** →
+   Download。
+4. 双击两个下载的 `.provisionprofile` 文件安装到本机。
+
+> 若门户里两个 App ID 没有 App Groups / Network Extensions 能力：先到 Identifiers 里给它们
+> 勾上这两个 capability，再创建描述文件。
+
 ## 步骤
 
 ### 1. 生成并打开工程
