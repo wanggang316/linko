@@ -17,6 +17,20 @@ targets:
       - path: apps/LinkoApp
     dependencies:
       - package: LinkoKit
+    postBuildScripts:
+      - name: Embed vendored sing-box
+        shell: /bin/sh
+        script: |
+          # Bundle the vendored core (if fetched) so the app finds it
+          # regardless of the launch working directory.
+          SRC="$SRCROOT/vendor/sing-box/sing-box"
+          DST="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/sing-box"
+          if [ -f "$SRC" ]; then
+            cp "$SRC" "$DST"
+            chmod +x "$DST"
+          fi
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/sing-box
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gumpw.linko

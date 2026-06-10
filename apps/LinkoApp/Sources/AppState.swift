@@ -440,6 +440,9 @@ final class AppState: ObservableObject {
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             candidates.append((override as NSString).expandingTildeInPath)
         }
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("sing-box").path {
+            candidates.append(bundled)
+        }
         candidates.append(FileManager.default.currentDirectoryPath + "/vendor/sing-box/sing-box")
         candidates.append("/opt/homebrew/bin/sing-box")
         candidates.append("/usr/local/bin/sing-box")
