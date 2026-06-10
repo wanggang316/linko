@@ -35,6 +35,8 @@ final class AppState: ObservableObject {
     private let systemProxy: SystemProxyRunning
     private let configBuilder: SingBoxConfigBuilding
     private let subscriptionParser: SubscriptionParsing
+    private let configValidator: ConfigValidating
+    private let loginItem: LoginItemControlling
     private let makeClashAPI: (URL) -> ClashAPIProviding
 
     // MARK: - Lifecycle serialization
@@ -47,6 +49,10 @@ final class AppState: ObservableObject {
     private var pendingLifecycleOperations = 0 {
         didSet { isSwitchingProxy = pendingLifecycleOperations > 0 }
     }
+
+    /// Drives the background subscription auto-update loop. Owned here so it
+    /// survives across turns and is cancelled/rescheduled on pref changes.
+    private let autoUpdateScheduler = AutoUpdateScheduler()
 
     // MARK: - Storage locations
 
@@ -67,16 +73,33 @@ final class AppState: ObservableObject {
         self.systemProxy = dependencies.systemProxy
         self.configBuilder = dependencies.configBuilder
         self.subscriptionParser = dependencies.subscriptionParser
+        self.configValidator = dependencies.configValidator
+        self.loginItem = dependencies.loginItem
         self.makeClashAPI = dependencies.makeClashAPI
         self.supportDirectoryURL = supportDirectoryURL
-        self.preferences = Self.loadJSON(
+
+        // Load persisted state. A *corrupt* file (present but undecodable) must
+        // not be silently dropped: we back it up alongside the original and
+        // surface a notice, so the user can recover their data instead of
+        // unknowingly starting from defaults. An *absent* file is a normal first
+        // run and stays silent.
+        var loadNotices: [String] = []
+        let loadedPreferences = Self.loadJSON(
             AppPreferences.self,
-            from: supportDirectoryURL.appendingPathComponent("preferences.json")
-        ) ?? .default
+            from: supportDirectoryURL.appendingPathComponent("preferences.json"),
+            what: "偏好设置",
+            notices: &loadNotices
+        )
+        self.preferences = loadedPreferences ?? .default
         self.subscriptions = Self.loadJSON(
             [LinkoKit.Subscription].self,
-            from: supportDirectoryURL.appendingPathComponent("subscriptions.json")
+            from: supportDirectoryURL.appendingPathComponent("subscriptions.json"),
+            what: "订阅",
+            notices: &loadNotices
         ) ?? []
+        if !loadNotices.isEmpty {
+            self.lastErrorMessage = loadNotices.joined(separator: "\n")
+        }
 
         // React immediately when the core dies in the background; otherwise
         // the system proxy keeps routing traffic to a dead local port until
@@ -89,6 +112,10 @@ final class AppState: ObservableObject {
                 }
             }
         }
+
+        // Start the background subscription auto-update loop if the user had
+        // it enabled in a previous session.
+        rescheduleAutoUpdate()
     }
 
     static func defaultSupportDirectoryURL() -> URL {
@@ -160,6 +187,23 @@ final class AppState: ObservableObject {
         }
         do {
             try writeConfigFile(nodes: nodes)
+            // PRE-FLIGHT VALIDATION (flagship safety feature): run
+            // `sing-box check` on the generated config before touching the
+            // core or the system proxy. On FATAL/ERROR we refuse to start, so
+            // a bad node/rule/DNS block can never silently break the user's
+            // network — the exact failure class we fixed for DNS.
+            // Run the checker off the main actor: it blocks on a subprocess
+            // (`sing-box check`), and we don't want to park the UI on it.
+            let validator = configValidator
+            let configURL = configFileURL
+            let validation = await Task.detached {
+                validator.validate(configFileURL: configURL, binaryURL: binaryURL)
+            }.value
+            guard validation.isValid else {
+                coreState = .failed(reason: validation.errorSummary)
+                lastErrorMessage = "配置校验未通过，已阻止启动：\(validation.errorSummary)"
+                return
+            }
             try coreRunner.start(binaryURL: binaryURL, configFileURL: configFileURL, logFileURL: logFileURL)
             coreState = coreRunner.state
             try systemProxy.enable(host: "127.0.0.1", port: preferences.mixedPort)
@@ -396,27 +440,184 @@ final class AppState: ObservableObject {
             throw AppError(message: "订阅中没有可识别的节点。")
         }
 
-        var subscription = LinkoKit.Subscription(
+        // Capture the node selected before the merge: the parser mints fresh
+        // UUIDs on every parse, so refreshing the backing subscription would
+        // otherwise orphan the persisted `selectedNodeID`. We re-map it onto
+        // the re-parsed node for the same server afterwards.
+        let previousSelected = selectedNode
+
+        let subscription = LinkoKit.Subscription(
             name: url.host ?? url.deletingPathExtension().lastPathComponent,
             url: url,
             lastUpdated: Date(),
             nodes: result.nodes
         )
-        if let index = subscriptions.firstIndex(where: { $0.url == url }) {
-            subscription.id = subscriptions[index].id
-            subscription.name = subscriptions[index].name
-            subscriptions[index] = subscription
-        } else {
-            subscriptions.append(subscription)
-        }
+        // Merge-by-url upsert: re-importing the same URL replaces that
+        // subscription in place (preserving its id + user-assigned name)
+        // instead of creating a duplicate.
+        subscriptions = SubscriptionStore.upsert(subscription, into: subscriptions)
         persistSubscriptions()
 
-        if selectedNode == nil {
-            preferences.selectedNodeID = allNodes.first?.id
+        // Re-map the selection across the refresh (matched by server identity),
+        // then fall back to the first available node if nothing survived.
+        let remapped = SubscriptionStore.remapSelection(
+            previousSelected: previousSelected,
+            subscriptions: subscriptions
+        )
+        let newSelection = remapped ?? SubscriptionStore.firstNodeID(in: subscriptions)
+        if preferences.selectedNodeID != newSelection {
+            preferences.selectedNodeID = newSelection
             persistPreferences()
         }
-        await restartProxying()
+
+        // Only restart the core when this import can change what the running
+        // config routes through: it supplies the selected node. A refresh of
+        // an unrelated subscription leaves the running config untouched.
+        if isSystemProxyEnabled, importAffectsRunningConfig(updatedURL: url) {
+            await restartProxying()
+        }
         return result.warnings
+    }
+
+    /// Whether re-importing the subscription at `updatedURL` changes the
+    /// running config — i.e. it backs the currently selected node. Evaluated
+    /// after the upsert + re-map so it reflects the freshly parsed nodes.
+    private func importAffectsRunningConfig(updatedURL: URL) -> Bool {
+        guard let selectedID = preferences.selectedNodeID,
+              let subscription = subscriptions.first(where: { $0.url == updatedURL })
+        else { return false }
+        return subscription.nodes.contains { $0.id == selectedID }
+    }
+
+    // MARK: - Subscription management (public surface)
+    //
+    // These are the documented contracts the Services agents implement against.
+    // `addSubscription` is the named entry point for the management UI; it
+    // currently delegates to `importSubscription`. The per-subscription
+    // operations re-fetch via the (transport-complete) `SubscriptionParser`,
+    // persist, and trigger a *validated* restart when the running config is
+    // affected.
+
+    /// Adds a subscription from a URL or local file path. Returns parser
+    /// warnings. Equivalent to `importSubscription` and kept as the named
+    /// management-UI entry point.
+    @discardableResult
+    func addSubscription(urlString: String) async throws -> [String] {
+        try await importSubscription(urlString: urlString)
+    }
+
+    /// Re-downloads and re-parses the subscription with `id`, replacing its
+    /// nodes, updating `lastUpdated`, and (if it backs the running config)
+    /// triggering a validated restart. Returns parser warnings.
+    /// Filled in by the Subscriptions Services agent.
+    @discardableResult
+    func refreshSubscription(id: UUID) async throws -> [String] {
+        guard let subscription = subscriptions.first(where: { $0.id == id }) else {
+            throw AppError(message: "未找到要刷新的订阅。")
+        }
+        return try await importSubscription(urlString: subscription.url.absoluteString)
+    }
+
+    /// Refreshes every subscription. Per-subscription failures are collected
+    /// rather than aborting the batch. Returns the aggregated warnings.
+    /// Filled in by the Subscriptions Services agent.
+    @discardableResult
+    func refreshAllSubscriptions() async -> [String] {
+        var warnings: [String] = []
+        for subscription in subscriptions {
+            do {
+                warnings += try await refreshSubscription(id: subscription.id)
+            } catch {
+                warnings.append("刷新「\(subscription.name)」失败：\(error.localizedDescription)")
+            }
+        }
+        return warnings
+    }
+
+    /// Renames the subscription with `id`. Persists. Does not touch the core.
+    func renameSubscription(id: UUID, to name: String) {
+        guard let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        subscriptions[index].name = trimmed
+        persistSubscriptions()
+    }
+
+    /// Removes the subscription with `id`. If it backed the selected node or
+    /// the running config, the selection is repaired and a validated restart
+    /// is triggered. Filled in by the Subscriptions Services agent.
+    func removeSubscription(id: UUID) async {
+        guard subscriptions.contains(where: { $0.id == id }) else { return }
+        // Did the removed subscription back the running config's selected node?
+        let backedSelection = SubscriptionStore.subscriptionBacksSelection(
+            id: id,
+            selectedNodeID: preferences.selectedNodeID,
+            subscriptions: subscriptions
+        )
+        subscriptions.removeAll { $0.id == id }
+        persistSubscriptions()
+        if backedSelection {
+            preferences.selectedNodeID = SubscriptionStore.firstNodeID(in: subscriptions)
+            persistPreferences()
+        }
+        // Only restart when the removal actually changed what the running
+        // config routes through; removing an unrelated subscription is a no-op
+        // for the core.
+        if isSystemProxyEnabled, backedSelection {
+            await restartProxying()
+        }
+    }
+
+    /// Enables/disables automatic subscription refresh and sets the interval
+    /// (minutes, clamped to `AppPreferences.minAutoUpdateMinutes`). Persists
+    /// and (re)schedules the background refresh Task. Filled in by the
+    /// Subscriptions Services agent.
+    func setAutoUpdate(enabled: Bool, intervalMinutes: Int) async {
+        var updated = preferences
+        updated.subscriptionAutoUpdateEnabled = enabled
+        updated.subscriptionAutoUpdateMinutes = AppPreferences.clampInterval(intervalMinutes)
+        await updatePreferences(updated)
+        rescheduleAutoUpdate()
+    }
+
+    /// Cancels and (if enabled) restarts the background auto-update loop to
+    /// match the current preferences. Delegates the `Task` lifecycle to
+    /// `AutoUpdateScheduler` and the interval math to `LinkoKit.AutoUpdateSchedule`.
+    private func rescheduleAutoUpdate() {
+        autoUpdateScheduler.reschedule(
+            enabled: preferences.subscriptionAutoUpdateEnabled,
+            intervalMinutes: preferences.subscriptionAutoUpdateMinutes
+        ) { [weak self] in
+            // Skip ticks while a lifecycle operation (toggle/restart) is in
+            // flight so an auto-refresh can't race a user-initiated switch.
+            guard let self, !self.isSwitchingProxy else { return }
+            _ = await self.refreshAllSubscriptions()
+        }
+    }
+
+    // MARK: - Launch at login (public surface)
+
+    /// Current "launch at login" registration status, for the Settings toggle.
+    var loginItemStatus: LoginItemStatus {
+        loginItem.status
+    }
+
+    /// Registers/unregisters the app as a login item and mirrors the intent
+    /// into preferences. Surfaces failures via `lastErrorMessage`.
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try loginItem.register()
+            } else {
+                try loginItem.unregister()
+            }
+            var updated = preferences
+            updated.launchAtLogin = enabled
+            preferences = updated
+            persistPreferences()
+        } catch {
+            lastErrorMessage = "设置开机自启动失败：\(error.localizedDescription)"
+        }
     }
 
     // MARK: - Preferences
@@ -502,11 +703,52 @@ final class AppState: ObservableObject {
 
     // MARK: - Persistence
 
-    private static func loadJSON<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
+    /// Loads and decodes persisted JSON. Distinguishes three outcomes:
+    /// - file absent / unreadable → `nil`, silent (normal first run);
+    /// - file present but undecodable → the corrupt file is backed up (so the
+    ///   user can recover it) and a notice is appended to `notices`, then `nil`;
+    /// - decodable → the value.
+    /// This guarantees a corrupted preferences/subscriptions file is never
+    /// silently discarded into defaults.
+    private static func loadJSON<T: Decodable>(
+        _ type: T.Type,
+        from url: URL,
+        what: String,
+        notices: inout [String]
+    ) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(type, from: data)
+        do {
+            return try decoder.decode(type, from: data)
+        } catch {
+            let backupURL = backUpCorruptFile(at: url)
+            if let backupURL {
+                notices.append("\(what)文件已损坏，无法读取，已备份到 \(backupURL.lastPathComponent) 并改用默认值。")
+            } else {
+                notices.append("\(what)文件已损坏，无法读取，已改用默认值。")
+            }
+            return nil
+        }
+    }
+
+    /// Moves a corrupt persisted file aside to a timestamped `.corrupt-…`
+    /// sibling so the user can recover it. Returns the backup URL, or `nil` if
+    /// the move failed (in which case the original is left untouched).
+    private static func backUpCorruptFile(at url: URL) -> URL? {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let backupURL = url.deletingPathExtension()
+            .appendingPathExtension("corrupt-\(stamp).json")
+        do {
+            // Remove a stale backup at the same path (extremely unlikely given
+            // the timestamp), then move the corrupt original aside.
+            try? FileManager.default.removeItem(at: backupURL)
+            try FileManager.default.moveItem(at: url, to: backupURL)
+            return backupURL
+        } catch {
+            return nil
+        }
     }
 
     private func persistJSON(_ value: some Encodable, to url: URL, what: String) {

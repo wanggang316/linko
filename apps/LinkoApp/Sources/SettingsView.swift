@@ -10,14 +10,133 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            StatusSection()
+            GeneralSection()
             PortsSection()
             CoreSection()
             DelayTestSection()
             AboutSection()
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 560)
+        .frame(width: 520, height: 600)
         .environmentObject(appState)
+    }
+}
+
+// =============================================================================
+// MARK: - Status
+// =============================================================================
+
+/// Surfaces the most recent error / notice — including a blocked-at-pre-flight
+/// config-validation failure — so a bad node or rule never fails silently.
+/// Only renders when there's something to show; offers a one-tap dismiss.
+private struct StatusSection: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var isValidationFailure: Bool {
+        if case .failed = appState.coreState { return true }
+        return false
+    }
+
+    var body: some View {
+        if let message = appState.lastErrorMessage, !message.isEmpty {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(headline)
+                            .foregroundStyle(Theme.Color.label)
+                        Text(message)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } icon: {
+                    Image(systemName: isValidationFailure
+                        ? "exclamationmark.shield.fill"
+                        : "exclamationmark.triangle.fill")
+                        .foregroundStyle(isValidationFailure ? Theme.Color.error : Theme.Color.warning)
+                }
+
+                Button("清除提示") {
+                    appState.lastErrorMessage = nil
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Theme.Color.accent)
+            } header: {
+                Text("状态")
+            }
+        }
+    }
+
+    private var headline: String {
+        isValidationFailure ? "配置校验未通过，已阻止启动" : "提示"
+    }
+}
+
+// =============================================================================
+// MARK: - General
+// =============================================================================
+
+/// App-level toggles. Currently the status-aware "launch at login" switch,
+/// backed by `SMAppService.mainApp` through `AppState.setLaunchAtLogin`.
+private struct GeneralSection: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var launchAtLogin = false
+
+    var body: some View {
+        Section {
+            Toggle(isOn: launchBinding) {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("开机自启")
+                        Text("登录后自动启动 Linko 并驻留菜单栏")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                    }
+                } icon: {
+                    Image(systemName: "power")
+                        .foregroundStyle(Theme.Color.accent)
+                }
+            }
+
+            if appState.loginItemStatus == .requiresApproval {
+                Label {
+                    Text("需在系统设置中批准：系统设置 › 通用 › 登录项。")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.secondaryLabel)
+                } icon: {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(Theme.Color.warning)
+                }
+            }
+        } header: {
+            Text("通用")
+        }
+        .onAppear(perform: syncFromStatus)
+    }
+
+    /// Drives the toggle off the live `SMAppService` status (so a flip in System
+    /// Settings is reflected) while routing writes through `AppState`.
+    private var launchBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLogin },
+            set: { newValue in
+                launchAtLogin = newValue
+                appState.setLaunchAtLogin(newValue)
+                syncFromStatus()
+            }
+        )
+    }
+
+    private func syncFromStatus() {
+        switch appState.loginItemStatus {
+        case .enabled, .requiresApproval:
+            launchAtLogin = true
+        case .notRegistered, .notFound:
+            launchAtLogin = false
+        }
     }
 }
 

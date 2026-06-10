@@ -14,6 +14,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case connections
     case traffic
     case logs
+    case subscriptions
     case rules
     case policyGroups
     case dns
@@ -22,13 +23,18 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
 
     /// Observability sections grouped under "监控".
     static let monitoringSections: [DashboardSection] = [.overview, .connections, .traffic, .logs]
+    /// Subscription-management sections grouped under "订阅".
+    static let subscriptionSections: [DashboardSection] = [.subscriptions]
     /// Routing-management sections grouped under "路由".
     static let routingSections: [DashboardSection] = [.rules, .policyGroups, .dns]
 
-    /// Whether this section is a routing-management surface that owns its own
-    /// navigation title and toolbar (so the dashboard chrome must step aside).
+    /// Sections that own their own navigation title and toolbar (so the
+    /// dashboard chrome must step aside): the routing panes plus 订阅.
+    private static let selfChromedSections: [DashboardSection] = subscriptionSections + routingSections
+
+    /// Whether this section owns its own navigation title and toolbar.
     var isRoutingSection: Bool {
-        Self.routingSections.contains(self)
+        Self.selfChromedSections.contains(self)
     }
 
     /// Sidebar / toolbar title (Chinese, matching the app's tone).
@@ -38,6 +44,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .connections: return "连接"
         case .traffic: return "流量"
         case .logs: return "日志"
+        case .subscriptions: return "订阅"
         case .rules: return "规则"
         case .policyGroups: return "策略组"
         case .dns: return "DNS"
@@ -51,6 +58,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .connections: return "point.3.connected.trianglepath.dotted"
         case .traffic: return "chart.xyaxis.line"
         case .logs: return "text.alignleft"
+        case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .rules: return "arrow.triangle.branch"
         case .policyGroups: return "rectangle.3.group"
         case .dns: return "globe"
@@ -109,6 +117,12 @@ struct DashboardView: View {
                         .tag(section)
                 }
             }
+            Section("订阅") {
+                ForEach(DashboardSection.subscriptionSections) { section in
+                    Label(section.title, systemImage: section.symbolName)
+                        .tag(section)
+                }
+            }
             Section("路由") {
                 ForEach(DashboardSection.routingSections) { section in
                     Label(section.title, systemImage: section.symbolName)
@@ -147,6 +161,8 @@ struct DashboardView: View {
             TrafficView()
         case .logs:
             LogsView()
+        case .subscriptions:
+            SubscriptionsView()
         case .rules:
             RulesView()
         case .policyGroups:
