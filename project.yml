@@ -17,6 +17,10 @@ targets:
       - path: apps/LinkoApp
     dependencies:
       - package: LinkoKit
+      # Embed the system extension into the app bundle so the app can install
+      # and start it. The extension is the only target that links Libbox.
+      - target: LinkoTunnel
+        embed: true
     postBuildScripts:
       - name: Embed vendored sing-box
         shell: /bin/sh
@@ -42,3 +46,44 @@ targets:
         SWIFT_VERSION: "6.0"
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
+        DEVELOPMENT_TEAM: HC438T2B8P
+        CODE_SIGN_ENTITLEMENTS: apps/LinkoApp/LinkoApp.entitlements
+
+  LinkoTunnel:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: apps/LinkoTunnel/Sources
+    dependencies:
+      # The extension is the sole consumer of libbox; the main app does not
+      # link it. Libbox.framework is a STATIC archive (gomobile bind output),
+      # so the Go runtime is linked directly into the LinkoTunnel binary — do
+      # NOT embed it (no dylib to copy, and embedding a static archive trips up
+      # signing/notarization).
+      - framework: vendor/libbox/Libbox.xcframework
+        embed: false
+        link: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gumpw.linko.tunnel
+        PRODUCT_NAME: LinkoTunnel
+        PRODUCT_MODULE_NAME: LinkoTunnel
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: apps/LinkoTunnel/Info.plist
+        DEVELOPMENT_TEAM: HC438T2B8P
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: apps/LinkoTunnel/LinkoTunnel.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+        # Ensure the framework is found at link + runtime.
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/vendor/libbox
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/../Frameworks"
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lresolv
