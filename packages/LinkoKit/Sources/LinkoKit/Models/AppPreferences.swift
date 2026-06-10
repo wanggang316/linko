@@ -2,7 +2,7 @@ import Foundation
 
 /// User-configurable application preferences, persisted as JSON under
 /// `~/Library/Application Support/linko/`.
-public struct AppPreferences: Codable, Equatable, Sendable {
+public struct AppPreferences: Codable, Equatable, Hashable, Sendable {
     /// Valid TCP port range for the local inbound / Clash API ports.
     public static let portRange: ClosedRange<Int> = 1...65535
 

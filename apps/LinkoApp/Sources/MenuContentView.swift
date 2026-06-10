@@ -267,6 +267,10 @@ struct MenuContentView: View {
             FooterButton(symbolName: "square.and.arrow.down", help: "导入订阅") {
                 appState.openWindow(id: WindowID.importSubscription, using: { openWindow(id: $0) })
             }
+            FooterButton(symbolName: "arrow.down.circle", help: "检查更新…") {
+                NSApp.activate(ignoringOtherApps: true)
+                UpdaterController.shared.checkForUpdates()
+            }
             FooterButton(symbolName: "gearshape", help: "设置") {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()

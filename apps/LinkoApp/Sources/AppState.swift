@@ -21,6 +21,11 @@ final class AppState: ObservableObject {
 
     @Published private(set) var preferences: AppPreferences
     @Published private(set) var subscriptions: [LinkoKit.Subscription]
+    /// Value-type summaries of every stored profile, in order. Mirrors
+    /// `profiles` and is the binding source for the profile management UI.
+    @Published private(set) var profileSummaries: [ProfileSummary] = []
+    /// The id of the active profile (drives selection highlighting in the UI).
+    @Published private(set) var activeProfileID: UUID
     @Published private(set) var coreState: CoreState = .stopped
     @Published private(set) var isSystemProxyEnabled = false
     @Published private(set) var isSwitchingProxy = false
@@ -62,6 +67,17 @@ final class AppState: ObservableObject {
     /// survives across turns and is cancelled/rescheduled on pref changes.
     private let autoUpdateScheduler = AutoUpdateScheduler()
 
+    // MARK: - Multi-profile state
+
+    /// The on-disk multi-profile store (`<support>/profiles/`).
+    private let profileStore: ProfileStore
+    /// Source of truth for the profile set + active pointer. The published
+    /// `preferences`/`subscriptions` mirror `profiles.active`; every edit to
+    /// them is folded back into this collection and persisted.
+    private var profiles: ProfileCollection {
+        didSet { refreshProfileSummaries() }
+    }
+
     // MARK: - Storage locations
 
     private let supportDirectoryURL: URL
@@ -99,13 +115,29 @@ final class AppState: ObservableObject {
             what: "偏好设置",
             notices: &loadNotices
         )
-        self.preferences = loadedPreferences ?? .default
-        self.subscriptions = Self.loadJSON(
+        let loadedSubscriptions = Self.loadJSON(
             [LinkoKit.Subscription].self,
             from: supportDirectoryURL.appendingPathComponent("subscriptions.json"),
             what: "订阅",
             notices: &loadNotices
         ) ?? []
+
+        // Load the multi-profile collection. On first run (no `profiles/` dir)
+        // the legacy single-config `preferences.json`/`subscriptions.json` are
+        // folded losslessly into one active "默认" profile by the store, which
+        // we then persist so subsequent launches read from `profiles/`.
+        let store = ProfileStore(supportDirectoryURL: supportDirectoryURL)
+        let collection = store.load(
+            legacyPreferences: loadedPreferences,
+            legacySubscriptions: loadedSubscriptions
+        )
+        self.profileStore = store
+        self.profiles = collection
+        self.activeProfileID = collection.activeProfileID
+        // The published single-config state mirrors the active profile.
+        self.preferences = collection.active.preferences
+        self.subscriptions = collection.active.subscriptions
+
         if !loadNotices.isEmpty {
             self.lastErrorMessage = loadNotices.joined(separator: "\n")
         }
@@ -135,6 +167,11 @@ final class AppState: ObservableObject {
         // Pick up an already-installed provider configuration (so a previously
         // approved extension is reflected and reusable without re-prompting).
         Task { await tunnelController.load() }
+
+        // Seed the published summaries (the `didSet` does not fire during init)
+        // and persist the collection so a first-run migration is written out.
+        refreshProfileSummaries()
+        try? profileStore.save(collection)
 
         // Start the background subscription auto-update loop if the user had
         // it enabled in a previous session.
@@ -1019,9 +1056,219 @@ final class AppState: ObservableObject {
 
     private func persistPreferences() {
         persistJSON(preferences, to: preferencesFileURL, what: "偏好设置")
+        syncActiveProfile()
     }
 
     private func persistSubscriptions() {
         persistJSON(subscriptions, to: subscriptionsFileURL, what: "订阅")
+        syncActiveProfile()
+    }
+
+    // MARK: - Profile synchronization
+
+    /// Folds the current published `preferences` + `subscriptions` back into the
+    /// active profile and persists the whole collection. Called from every edit
+    /// path (`persistPreferences`/`persistSubscriptions`) so an import, node
+    /// selection, mode change, port change, or routing edit lands in the active
+    /// profile on disk. The legacy `preferences.json`/`subscriptions.json` are
+    /// still written for backward compatibility.
+    private func syncActiveProfile() {
+        var active = profiles.active
+        // Skip a redundant write when nothing actually changed.
+        guard active.preferences != preferences || active.subscriptions != subscriptions else { return }
+        active.preferences = preferences
+        active.subscriptions = subscriptions
+        profiles = ProfileStore.upsert(active, in: profiles)
+        saveProfiles()
+    }
+
+    /// Persists `profiles` to disk, surfacing a failure as a notice rather than
+    /// crashing (the in-memory collection remains the source of truth).
+    private func saveProfiles() {
+        do {
+            try profileStore.save(profiles)
+        } catch {
+            lastErrorMessage = "保存配置档案失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Recomputes the published `[ProfileSummary]` and `activeProfileID` from the
+    /// current collection (the cheap, node-free projection the UI binds to).
+    private func refreshProfileSummaries() {
+        let active = profiles.activeProfileID
+        activeProfileID = active
+        profileSummaries = profiles.profiles.map { ProfileSummary(profile: $0, activeProfileID: active) }
+    }
+}
+
+// MARK: - ProfileManaging
+
+/// `AppState`'s profile-management surface. Every mutating op persists the
+/// collection; `switchProfile` (and the create/duplicate/delete paths that imply
+/// a switch) re-generate + validate + restart on the serialized lifecycle chain.
+extension AppState: ProfileManaging {
+
+    /// Creates a new empty profile named `name` (de-duplicated) and switches to
+    /// it (re-generating + validating + restarting if the core is running).
+    /// Returns the new profile's id.
+    @discardableResult
+    func createProfile(named name: String) async -> UUID {
+        let (collection, created) = ProfileStore.create(name: name, in: profiles)
+        profiles = collection
+        saveProfiles()
+        await activateAndApply(id: created.id)
+        return created.id
+    }
+
+    /// Deep-duplicates the profile with `id` (fresh node ids, re-pointed
+    /// selection) and switches to the copy. Returns the copy's id, or `nil` if
+    /// `id` is unknown.
+    @discardableResult
+    func duplicateProfile(id: UUID) async -> UUID? {
+        let result: (collection: ProfileCollection, created: Profile)
+        do {
+            result = try ProfileStore.duplicate(id: id, in: profiles)
+        } catch {
+            lastErrorMessage = (error as? ProfileStoreError)?.errorDescription
+                ?? "复制配置档案失败：\(error.localizedDescription)"
+            return nil
+        }
+        profiles = result.collection
+        saveProfiles()
+        await activateAndApply(id: result.created.id)
+        return result.created.id
+    }
+
+    /// Renames the profile with `id`. Persists. Does not touch the running core.
+    /// When the active profile is renamed the summary list refreshes in place.
+    func renameProfile(id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            profiles = try ProfileStore.rename(id: id, to: trimmed, in: profiles)
+        } catch {
+            lastErrorMessage = (error as? ProfileStoreError)?.errorDescription
+                ?? "重命名配置档案失败：\(error.localizedDescription)"
+            return
+        }
+        saveProfiles()
+    }
+
+    /// Deletes the profile with `id`. When the deleted profile was active,
+    /// activation moves to a neighbor and the core is re-generated/restarted onto
+    /// it. A no-op (with a surfaced notice) when `id` is the last profile.
+    func deleteProfile(id: UUID) async {
+        let wasActive = (id == profiles.activeProfileID)
+        let updated: ProfileCollection
+        do {
+            updated = try ProfileStore.delete(id: id, in: profiles)
+        } catch {
+            lastErrorMessage = (error as? ProfileStoreError)?.errorDescription
+                ?? "删除配置档案失败：\(error.localizedDescription)"
+            return
+        }
+        profiles = updated
+        saveProfiles()
+        if wasActive {
+            // The active pointer moved to a neighbor; bring the core onto it.
+            await activateAndApply(id: profiles.activeProfileID)
+        }
+    }
+
+    /// Switches the active profile to `id`: swaps in its subscriptions +
+    /// preferences, re-generates + validates the config, and restarts the core
+    /// if running. A no-op when `id` is already active. On validation failure the
+    /// switch is aborted and the prior active profile left in place.
+    func switchProfile(id: UUID) async {
+        guard id != profiles.activeProfileID else { return }
+        guard profiles.profiles.contains(where: { $0.id == id }) else {
+            lastErrorMessage = ProfileStoreError.profileNotFound(id).errorDescription
+            return
+        }
+        await activateAndApply(id: id)
+    }
+
+    /// Shared activation pipeline: marks `id` active in the collection, mirrors
+    /// its preferences/subscriptions into the published state, and (on the
+    /// serialized lifecycle chain) regenerates + validates + restarts the core.
+    /// A validation failure rolls the active pointer + published state back to
+    /// the previously active profile, so a bad profile can never strand the user.
+    private func activateAndApply(id: UUID) async {
+        guard let activated = try? ProfileStore.activate(id: id, in: profiles) else {
+            lastErrorMessage = ProfileStoreError.profileNotFound(id).errorDescription
+            return
+        }
+        // Snapshot for rollback before any state is mutated.
+        let previousCollection = profiles
+        let previousPreferences = preferences
+        let previousSubscriptions = subscriptions
+        let target = activated.active
+
+        await runSerializedLifecycle { [self] in
+            // Was the *previous* profile's mode serving traffic? Read this
+            // before reassigning `preferences`, since `isProxyActive` keys off
+            // the current mode.
+            let wasActive = isProxyActive
+            // Tear down whatever the previous profile had running.
+            switch previousPreferences.proxyMode {
+            case .systemProxy:
+                if isSystemProxyEnabled { stopProxying() }
+            case .tun:
+                if tunnelController.isActive { await stopTunnelInternal() }
+            }
+
+            // Swap the published single-config state to the target profile. We
+            // assign directly (not via setProxyMode/updatePreferences) so the
+            // new profile's mode/ports/routing all apply atomically.
+            applyActiveProfile(collection: activated, profile: target)
+            lastErrorMessage = nil
+
+            // Only bring the core up if the previous profile had it on.
+            guard wasActive else { return }
+            switch preferences.proxyMode {
+            case .systemProxy:
+                await startProxying()
+            case .tun:
+                await startTunnel()
+            }
+
+            // On a validation/startup failure, restore the previous profile so a
+            // broken switch never strands the user offline.
+            if case .failed(let reason) = coreState {
+                let collectionRollback = previousCollection
+                applyActiveProfile(
+                    collection: collectionRollback,
+                    profile: collectionRollback.active,
+                    preferencesOverride: previousPreferences,
+                    subscriptionsOverride: previousSubscriptions
+                )
+                lastErrorMessage = "切换配置档案失败，已恢复上一个档案：\(reason)"
+                switch preferences.proxyMode {
+                case .systemProxy:
+                    await startProxying()
+                case .tun:
+                    await startTunnel()
+                }
+            }
+        }
+    }
+
+    /// Adopts `profile` as the active one: updates the collection, mirrors its
+    /// preferences/subscriptions into the published state, rewrites the legacy
+    /// mirror files, persists the collection, and reschedules auto-update. The
+    /// overrides let the rollback path restore the exact prior published values.
+    private func applyActiveProfile(
+        collection: ProfileCollection,
+        profile: Profile,
+        preferencesOverride: AppPreferences? = nil,
+        subscriptionsOverride: [LinkoKit.Subscription]? = nil
+    ) {
+        profiles = collection
+        preferences = preferencesOverride ?? profile.preferences
+        subscriptions = subscriptionsOverride ?? profile.subscriptions
+        persistJSON(preferences, to: preferencesFileURL, what: "偏好设置")
+        persistJSON(subscriptions, to: subscriptionsFileURL, what: "订阅")
+        saveProfiles()
+        rescheduleAutoUpdate()
     }
 }

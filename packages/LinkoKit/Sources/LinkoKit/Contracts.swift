@@ -304,3 +304,97 @@ public struct SubscriptionParseResult: Equatable, Sendable {
 public protocol SubscriptionParsing {
     func parse(clashYAML: String) throws -> SubscriptionParseResult
 }
+
+// MARK: - Multi-profile management
+
+/// A lightweight, value-type summary of a profile for list rendering: the menu
+/// and management UI bind to `[ProfileSummary]` rather than the full `Profile`
+/// (which carries every node), so a profile list redraw never copies node data.
+public struct ProfileSummary: Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let name: String
+    /// Whether this is the currently active profile.
+    public let isActive: Bool
+    /// Number of subscriptions in the profile.
+    public let subscriptionCount: Int
+    /// Number of nodes across all of the profile's subscriptions.
+    public let nodeCount: Int
+    /// The profile's proxy mode (for an at-a-glance badge).
+    public let proxyMode: ProxyMode
+    public let updatedAt: Date
+
+    public init(
+        id: UUID,
+        name: String,
+        isActive: Bool,
+        subscriptionCount: Int,
+        nodeCount: Int,
+        proxyMode: ProxyMode,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.name = name
+        self.isActive = isActive
+        self.subscriptionCount = subscriptionCount
+        self.nodeCount = nodeCount
+        self.proxyMode = proxyMode
+        self.updatedAt = updatedAt
+    }
+
+    /// Derives a summary from a `Profile`, given the active id.
+    public init(profile: Profile, activeProfileID: UUID) {
+        self.init(
+            id: profile.id,
+            name: profile.name,
+            isActive: profile.id == activeProfileID,
+            subscriptionCount: profile.subscriptions.count,
+            nodeCount: profile.allNodes.count,
+            proxyMode: profile.preferences.proxyMode,
+            updatedAt: profile.updatedAt
+        )
+    }
+}
+
+/// The public profile-management surface implemented by the app's `AppState`
+/// (declared here so LinkoKit-side consumers and tests can depend on the
+/// contract, and to document the exact signatures downstream UI codes against).
+///
+/// Every mutating call persists the profile collection. Switching the active
+/// profile (`switchProfile`) is the one operation that touches the running
+/// core: it swaps in the target profile's `subscriptions` + `preferences`,
+/// re-generates and pre-flight-validates the config, and restarts the core if
+/// it was running — all on `AppState`'s serialized lifecycle chain. Validation
+/// failure aborts the switch and surfaces the error, leaving the previously
+/// active profile in place. `@MainActor` because `AppState` is main-actor-bound.
+@MainActor
+public protocol ProfileManaging: AnyObject {
+    /// Value-type summaries of all profiles, in stored order, for list UIs.
+    var profileSummaries: [ProfileSummary] { get }
+    /// The id of the active profile (drives selection highlighting).
+    var activeProfileID: UUID { get }
+
+    /// Creates a new empty profile named `name` (de-duplicated) and switches to
+    /// it. Returns the new profile's id.
+    @discardableResult
+    func createProfile(named name: String) async -> UUID
+
+    /// Deep-duplicates the profile with `id` (fresh node ids, re-pointed
+    /// selection) and switches to the copy. Returns the copy's id, or `nil` if
+    /// `id` is unknown.
+    @discardableResult
+    func duplicateProfile(id: UUID) async -> UUID?
+
+    /// Renames the profile with `id`. Does not touch the running core.
+    func renameProfile(id: UUID, to name: String)
+
+    /// Deletes the profile with `id`. When it was active, activation moves to a
+    /// neighbor and the core is restarted onto that profile. Surfaces an error
+    /// (and is a no-op) when `id` is the last remaining profile.
+    func deleteProfile(id: UUID) async
+
+    /// Switches the active profile to `id`: swaps in its subscriptions +
+    /// preferences, re-generates + validates the config, and restarts the core
+    /// if running. A no-op when `id` is already active. On validation failure
+    /// the switch is aborted and the error surfaced.
+    func switchProfile(id: UUID) async
+}

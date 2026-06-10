@@ -503,8 +503,14 @@ private struct DelayTestSection: View {
 // MARK: - About
 // =============================================================================
 
-/// App identity, license, and upstream attribution.
+/// App identity, license, upstream attribution, and the Sparkle update controls
+/// ("检查更新…" + an automatic-check toggle). Updates are delivered through
+/// Sparkle 2; runtime requires a signed release + hosted appcast (docs/RELEASE.md).
 private struct AboutSection: View {
+    @ObservedObject private var updater = UpdaterController.shared
+
+    @State private var autoCheck = UpdaterController.shared.automaticallyChecksForUpdates
+
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -548,8 +554,50 @@ private struct AboutSection: View {
                 Image(systemName: "shippingbox")
                     .foregroundStyle(Theme.Color.accent)
             }
+
+            updateControls
         } header: {
             Text("关于")
+        } footer: {
+            Text("更新通过 Sparkle 分发，需经开发者 EdDSA 签名后才会安装。")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.secondaryLabel)
+        }
+    }
+
+    /// Sparkle controls: a manual "检查更新…" trigger (disabled while a check is
+    /// already running) and the automatic-check toggle.
+    @ViewBuilder
+    private var updateControls: some View {
+        LabeledContent {
+            Button("检查更新…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canCheckForUpdates)
+        } label: {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("软件更新")
+                    Text("从官方源获取最新版本")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.secondaryLabel)
+                }
+            } icon: {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(Theme.Color.accent)
+            }
+        }
+
+        Toggle(isOn: $autoCheck) {
+            Label {
+                Text("自动检查更新")
+            } icon: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(Theme.Color.accent)
+            }
+        }
+        .onChange(of: autoCheck) { _, newValue in
+            updater.automaticallyChecksForUpdates = newValue
         }
     }
 }

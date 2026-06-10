@@ -13,8 +13,11 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview
     case connections
     case traffic
+    case apps
     case logs
+    case profiles
     case subscriptions
+    case nodes
     case rules
     case policyGroups
     case dns
@@ -22,15 +25,18 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 
     /// Observability sections grouped under "监控".
-    static let monitoringSections: [DashboardSection] = [.overview, .connections, .traffic, .logs]
-    /// Subscription-management sections grouped under "订阅".
-    static let subscriptionSections: [DashboardSection] = [.subscriptions]
+    static let monitoringSections: [DashboardSection] = [.overview, .connections, .traffic, .apps, .logs]
+    /// Profile-management sections grouped under "配置".
+    static let profileSections: [DashboardSection] = [.profiles]
+    /// Subscription/node sections grouped under "订阅".
+    static let subscriptionSections: [DashboardSection] = [.subscriptions, .nodes]
     /// Routing-management sections grouped under "路由".
     static let routingSections: [DashboardSection] = [.rules, .policyGroups, .dns]
 
     /// Sections that own their own navigation title and toolbar (so the
-    /// dashboard chrome must step aside): the routing panes plus 订阅.
-    private static let selfChromedSections: [DashboardSection] = subscriptionSections + routingSections
+    /// dashboard chrome must step aside): the routing panes plus 配置 / 订阅 / 节点.
+    private static let selfChromedSections: [DashboardSection] =
+        profileSections + subscriptionSections + routingSections
 
     /// Whether this section owns its own navigation title and toolbar.
     var isRoutingSection: Bool {
@@ -43,8 +49,11 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .overview: return "概览"
         case .connections: return "连接"
         case .traffic: return "流量"
+        case .apps: return "应用"
         case .logs: return "日志"
+        case .profiles: return "配置"
         case .subscriptions: return "订阅"
+        case .nodes: return "节点"
         case .rules: return "规则"
         case .policyGroups: return "策略组"
         case .dns: return "DNS"
@@ -57,8 +66,11 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .overview: return "square.grid.2x2"
         case .connections: return "point.3.connected.trianglepath.dotted"
         case .traffic: return "chart.xyaxis.line"
+        case .apps: return "square.grid.3x3.fill"
         case .logs: return "text.alignleft"
+        case .profiles: return "rectangle.stack"
         case .subscriptions: return "antenna.radiowaves.left.and.right"
+        case .nodes: return "point.3.connected.trianglepath.dotted"
         case .rules: return "arrow.triangle.branch"
         case .policyGroups: return "rectangle.3.group"
         case .dns: return "globe"
@@ -117,6 +129,12 @@ struct DashboardView: View {
                         .tag(section)
                 }
             }
+            Section("配置") {
+                ForEach(DashboardSection.profileSections) { section in
+                    Label(section.title, systemImage: section.symbolName)
+                        .tag(section)
+                }
+            }
             Section("订阅") {
                 ForEach(DashboardSection.subscriptionSections) { section in
                     Label(section.title, systemImage: section.symbolName)
@@ -159,10 +177,16 @@ struct DashboardView: View {
             ConnectionsView()
         case .traffic:
             TrafficView()
+        case .apps:
+            AppTrafficView()
         case .logs:
             LogsView()
+        case .profiles:
+            ProfilesView()
         case .subscriptions:
             SubscriptionsView()
+        case .nodes:
+            NodesView()
         case .rules:
             RulesView()
         case .policyGroups:

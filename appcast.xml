@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle appcast TEMPLATE for Linko.
+
+  This is a scaffold, NOT a live feed. Host the real, generated appcast at the
+  URL configured as `SUFeedURL` in project.yml (placeholder:
+  https://example.com/appcast.xml).
+
+  Do NOT hand-edit `<item>` entries for releases. Instead, run Sparkle's
+  `generate_appcast` against the directory holding your signed *.zip / *.dmg
+  archives — it fills in version, length, EdDSA signature, and minimum-system
+  version automatically. See docs/RELEASE.md.
+
+  The example item below shows the expected shape produced by generate_appcast.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Linko</title>
+    <link>https://example.com/appcast.xml</link>
+    <description>Linko updates feed</description>
+    <language>zh</language>
+
+    <!--
+    <item>
+      <title>1.0.0</title>
+      <pubDate>Mon, 01 Jan 2026 00:00:00 +0000</pubDate>
+      <sparkle:version>100</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>本次更新</h2>
+        <ul><li>示例变更说明。</li></ul>
+      ]]></description>
+      <enclosure
+        url="https://example.com/releases/Linko-1.0.0.zip"
+        length="0"
+        type="application/octet-stream"
+        sparkle:edSignature="REPLACE_WITH_GENERATED_ED_SIGNATURE" />
+    </item>
+    -->
+  </channel>
+</rss>
