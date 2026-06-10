@@ -1,60 +1,65 @@
 # Surge 功能对齐矩阵
 
-> 目标：功能上向 Surge Mac 对齐；定位差异：linko 是「代理客户端」，不做 Surge 的
-> 「Web 调试代理」路线（MITM/重写/脚本）。状态列：✅ 已有 / 🚧 本轮 / 计划里程碑 / ❌ 非目标。
+> 目标：功能上向 Surge Mac 对齐并超越；定位差异：linko 是「代理客户端」，不做 Surge 的
+> 「Web 调试代理」路线（MITM/重写/脚本）。
+> 状态：✅ 已交付 / 🚧 进行中 / ⏳ 计划 / ❌ 非目标。
 
 ## 1. 流量接管
 
-| Surge 功能 | 说明 | linko 状态 |
+| Surge 功能 | sing-box 对应 | linko 状态 |
 |---|---|---|
-| 系统代理（HTTP/SOCKS 监听） | 写系统代理设置 | ✅ M1 |
-| 增强模式（TUN 虚拟网卡） | 接管全部流量，含不走系统代理的进程 | M2（NE System Extension + 内核 tun） |
-| 网关模式 / DHCP / 端口转发 | 作为局域网网关管理设备 | ❌ 非目标 |
+| 系统代理（HTTP/SOCKS 监听） | mixed inbound + 写系统代理 | ✅ |
+| 增强模式（TUN 虚拟网卡，接管全部流量） | NE PacketTunnelProvider + libbox tun | 🚧 M2 |
+| 网关 / DHCP / 端口转发 | — | ❌ 非目标 |
 
 ## 2. 规则引擎
 
 | Surge 功能 | sing-box 对应 | linko 状态 |
 |---|---|---|
-| DOMAIN / SUFFIX / KEYWORD | domain / domain_suffix / domain_keyword | M3 |
-| IP-CIDR / GEOIP / ASN | ip_cidr / rule_set(geoip) | M3 |
-| RULE-SET 远程规则集 | rule_set（remote, srs） | M3 |
-| PROCESS-NAME 按进程分流 | process_name | M3 |
-| LOGICAL（AND/OR/NOT） | logical 规则 | M3 |
-| SUBNET（按网络环境切换） | 无直接对应 | M4（客户端层实现） |
-| FINAL | route.final | ✅ M1（固定指向选择器） |
-
-内核已全部支持，缺口在 linko 的配置模型与规则编辑 UI。
+| DOMAIN / SUFFIX / KEYWORD / REGEX | domain / domain_suffix / domain_keyword / domain_regex | ✅ |
+| IP-CIDR / IP-CIDR6 / SRC-IP | ip_cidr / source_ip_cidr | ✅ |
+| GEOIP / GEOSITE / RULE-SET（远程） | rule_set（geoip/geosite/remote srs） | ✅ |
+| PROCESS-NAME / PROCESS-PATH | process_name / process_path | ✅ |
+| PORT / DEST-PORT / SRC-PORT | port / source_port | ✅ |
+| LOGICAL（AND/OR/NOT） | logical 规则（mode + invert） | ✅ |
+| FINAL | route.final | ✅ |
+| 规则编辑器（增删 / 拖拽排序） | — | ✅ |
+| 导入 Surge / Clash 规则 | — | ✅ |
+| SUBNET（按网络环境切换策略） | 客户端层实现 | ⏳ M4 |
 
 ## 3. 策略系统
 
 | Surge 功能 | sing-box 对应 | linko 状态 |
 |---|---|---|
-| 多协议节点 | ss/vmess/vless/trojan/hysteria2/tuic 等 | ✅ M1（订阅导入） |
-| WireGuard / SSH 策略 | endpoint / ssh outbound | M4 |
-| Snell | 无 | ❌（Surge 私有协议） |
-| select 策略组 | selector | ✅ M1（单组） |
-| url-test 自动测速 | urltest | M3 |
-| fallback / load-balance | urltest 近似 / 无 | M4 评估 |
-| 策略嵌套、多策略组 | selector 嵌套 | M3 |
+| 多协议节点（SS/VMess/VLESS/Trojan/Hy2/TUIC） | 对应 outbound | ✅ |
+| 完整传输层（TLS/Reality/uTLS/ALPN/ws/grpc/http/obfs） | shared tls + v2ray-transport + plugin | ✅ |
+| select 手动策略组 | selector | ✅ |
+| url-test 自动测速 | urltest（url/interval/tolerance） | ✅ |
+| 策略组嵌套、多策略组 | selector/urltest 嵌套 | ✅ |
+| fallback / load-balance | 降级为 urltest（已标注） | ⚠️ 部分 |
+| WireGuard / SSH 策略 | endpoint / ssh outbound | ⏳ M4 |
+| Snell | — | ❌（Surge 私有协议） |
 
 ## 4. DNS
 
 | Surge 功能 | linko 状态 |
 |---|---|
-| 自定义 DNS / DoH | M3（设置页 + 内核 dns 模块） |
-| 本地映射 / hosts | M4 |
-| fake-ip（TUN 场景） | M2 随 TUN 落地 |
+| 自定义 DNS / DoH / DoT / DoQ | ✅（1.12+ typed-server 格式 + default_domain_resolver） |
+| DNS 分流规则 | ✅（action-based rules） |
+| fake-ip | ⏳ 随 M2 TUN 启用 |
+| 本地映射 / hosts | ⏳ M4 |
 
-## 5. 可观测性（本轮重点）
+## 5. 可观测性
 
 | Surge 功能 | 数据来源 | linko 状态 |
 |---|---|---|
-| Dashboard 主窗口 | — | 🚧 本轮 |
-| 实时连接列表（含进程/规则/链路） | Clash API /connections | 🚧 本轮 |
-| 实时流量速率/总量 | Clash API /traffic | 🚧 本轮 |
-| 日志查看 | Clash API /logs | 🚧 本轮 |
-| 延迟测试 | /proxies/{}/delay | ✅ M1 |
-| 按 App/策略流量统计 | connections 聚合 | M3 |
+| Dashboard 主窗口 | — | ✅ |
+| 实时连接列表（进程/目标/规则/链路/时长，排序） | Clash API /connections | ✅ |
+| 连接搜索 / 过滤 / 关闭（单条+全部）/ 详情 | /connections (+DELETE) | ✅ |
+| 实时流量速率 / 总量 / 内存 | /traffic | ✅ |
+| 日志查看 / 导出 | /logs | ✅ |
+| 延迟测试 | /proxies/{}/delay | ✅ |
+| 按 App/策略流量统计 | connections 聚合 | ⏳ M4 |
 
 ## 6. HTTP 处理与调试（定位差异，非目标）
 
@@ -65,10 +70,21 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
 
 | Surge 功能 | linko 状态 |
 |---|---|
-| 多 Profile 切换 / 托管配置 | M4 |
-| 订阅管理（更新/删除/多订阅） | ✅ 基础已有，🚧 本轮补管理 UI |
-| 菜单栏 UI | ✅，🚧 本轮原生化重做 |
-| 开机自启 | M4（SMAppService） |
-| 自动更新 | M4（Sparkle，随签名公证分发） |
-| CLI / HTTP API / URL Scheme | M5 评估 |
+| 订阅管理（多订阅 / 更新 / 自动更新 / 删除 / 重命名） | ✅ |
+| **启动前配置校验（sing-box check 预检，拦截坏配置）** | ✅（超越 Surge 的安全网） |
+| 菜单栏 UI / Dashboard | ✅（原生 SwiftUI） |
+| 开机自启 | ✅（SMAppService） |
+| 多 Profile 切换 / 托管配置 | ⏳ M4 |
+| 自动更新（App 自身） | ⏳ M4（Sparkle，随签名公证） |
+| CLI / HTTP API / URL Scheme | ⏳ M5 评估 |
 | Ponte 设备组网 | ❌ 非目标 |
+
+---
+
+## 里程碑
+
+- **已交付**：系统代理 MVP、原生 Dashboard、规则引擎 + DNS + 策略组 + 传输层补全 +
+  规则导入、生产硬化（启动前配置预校验、多订阅管理 + 自动更新、连接搜索/过滤/关闭/详情、开机自启）。
+- **M2（进行中）**：TUN 全局模式 —— NetworkExtension System Extension + libbox 嵌入 sing-box，
+  Developer ID 签名（保持 SIP 开启），首次启用需系统设置批准一次。
+- **M4**：多 Profile、WireGuard/SSH、Sparkle 自动更新、SUBNET 策略、按 App 流量统计。
