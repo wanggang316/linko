@@ -135,9 +135,7 @@ public struct ClashAPIClient: ClashAPIProviding {
         pathComponents: [String],
         queryItems: [URLQueryItem]? = nil
     ) -> URLRequest {
-        // appendingPathComponent percent-encodes node/selector names that
-        // contain spaces or non-ASCII characters.
-        var url = pathComponents.reduce(baseURL) { $0.appendingPathComponent($1) }
+        var url = Self.appending(pathComponents: pathComponents, to: baseURL)
         if let queryItems, !queryItems.isEmpty,
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         {
@@ -160,7 +158,7 @@ public struct ClashAPIClient: ClashAPIProviding {
         pathComponents: [String],
         queryItems: [URLQueryItem] = []
     ) -> URLRequest {
-        let httpURL = pathComponents.reduce(baseURL) { $0.appendingPathComponent($1) }
+        let httpURL = Self.appending(pathComponents: pathComponents, to: baseURL)
         var components = URLComponents(url: httpURL, resolvingAgainstBaseURL: false)
         // http -> ws, https -> wss; URLSession's WebSocket task requires it.
         components?.scheme = (baseURL.scheme == "https") ? "wss" : "ws"
@@ -173,6 +171,34 @@ public struct ClashAPIClient: ClashAPIProviding {
         }
         let url = components?.url ?? httpURL
         return URLRequest(url: url)
+    }
+
+    /// Characters allowed unescaped inside a single URL path segment. `/` is
+    /// deliberately excluded: a node or selector name may legitimately contain
+    /// a slash (e.g. `"auto/urltest"`), and `URL.appendingPathComponent` would
+    /// otherwise split it into two segments and point at the wrong endpoint.
+    private static let pathSegmentAllowed: CharacterSet =
+        .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+
+    /// Appends each component as a single, fully percent-encoded path segment.
+    /// Unlike `appendingPathComponent`, this encodes `/` (-> `%2F`) so a name
+    /// containing a slash stays one segment, and it encodes spaces and
+    /// non-ASCII characters (e.g. CJK selector names) consistently. Setting
+    /// `percentEncodedPath` directly avoids the double-escaping that
+    /// `appendPathComponent` would apply to an already-encoded string.
+    private static func appending(pathComponents: [String], to base: URL) -> URL {
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return base
+        }
+        let encoded = pathComponents.map { component in
+            component.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? component
+        }
+        // Preserve any path already on the base URL (normally none for the
+        // Clash API root), trimming a trailing slash to avoid a double `//`.
+        let basePath = components.percentEncodedPath
+        let prefix = basePath.hasSuffix("/") ? String(basePath.dropLast()) : basePath
+        components.percentEncodedPath = prefix + "/" + encoded.joined(separator: "/")
+        return components.url ?? base
     }
 
     // MARK: - Transport

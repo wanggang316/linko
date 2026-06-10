@@ -208,6 +208,37 @@ final class ClashAPIClientTests: XCTestCase {
         )
     }
 
+    func testSelectEncodesSlashInSelectorAsSingleSegment() async throws {
+        StubURLProtocol.stub = .init(statusCode: 204, body: Data())
+
+        // A selector name containing '/' must stay one path segment; otherwise
+        // `appendingPathComponent` would split it and hit the wrong endpoint.
+        try await client.select(selector: "auto/urltest", nodeName: "HK-01")
+
+        let request = try XCTUnwrap(lastRequest)
+        XCTAssertEqual(request.httpMethod, "PUT")
+        // On the wire the '/' must be escaped so it stays one path segment;
+        // `appendingPathComponent` would emit a bare `.../auto/urltest`.
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://127.0.0.1:9090/proxies/auto%2Furltest"
+        )
+    }
+
+    func testSelectEncodesUnicodeAndSlashInSelector() async throws {
+        StubURLProtocol.stub = .init(statusCode: 204, body: Data())
+
+        try await client.select(selector: "香港/中转", nodeName: "HK-01")
+
+        let request = try XCTUnwrap(lastRequest)
+        // Both the CJK characters and the embedded '/' are percent-encoded into
+        // a single path segment.
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://127.0.0.1:9090/proxies/%E9%A6%99%E6%B8%AF%2F%E4%B8%AD%E8%BD%AC"
+        )
+    }
+
     func testSelectThrowsOnErrorStatusWithMessage() async {
         StubURLProtocol.stub = .init(
             statusCode: 400,
@@ -249,6 +280,26 @@ final class ClashAPIClientTests: XCTestCase {
                 URLQueryItem(name: "url", value: "http://www.gstatic.com/generate_204"),
             ]
         )
+    }
+
+    func testDelayEncodesSlashInNodeNameKeepingTrailingSegment() async throws {
+        StubURLProtocol.stub = .init(statusCode: 200, body: Data(#"{"delay":42}"#.utf8))
+
+        // The node name sits between two fixed segments (`proxies/<name>/delay`);
+        // a raw '/' in the name would shift the `delay` segment and break the call.
+        _ = try await client.delay(
+            nodeName: "auto/urltest",
+            testURL: "http://www.gstatic.com/generate_204",
+            timeoutMilliseconds: 5000
+        )
+
+        let request = try XCTUnwrap(lastRequest)
+        let components = try XCTUnwrap(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        )
+        // The trailing `delay` segment stays put because the '/' in the node
+        // name is escaped rather than treated as a path separator.
+        XCTAssertEqual(components.percentEncodedPath, "/proxies/auto%2Furltest/delay")
     }
 
     func testDelayThrowsOnTimeoutStatus() async {

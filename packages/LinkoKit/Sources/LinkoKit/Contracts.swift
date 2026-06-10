@@ -56,6 +56,75 @@ public protocol ShellRunning: Sendable {
     func run(executablePath: String, arguments: [String]) throws -> ShellResult
 }
 
+// MARK: - Pre-flight config validation
+
+/// Outcome of running `sing-box check` against a generated configuration.
+///
+/// `errors` are FATAL/ERROR lines that mean the core would refuse to start
+/// (a bad node, an unrepresentable rule, an invalid Reality public_key, …).
+/// `warnings` are WARN lines (typically deprecation notices) that do not
+/// prevent a start. A config is `isValid` exactly when there are no errors.
+public struct ConfigValidationResult: Equatable, Sendable {
+    public let isValid: Bool
+    public let errors: [String]
+    public let warnings: [String]
+
+    public init(isValid: Bool, errors: [String], warnings: [String]) {
+        self.isValid = isValid
+        self.errors = errors
+        self.warnings = warnings
+    }
+
+    /// A single line summarizing the errors, for surfacing in the UI.
+    public var errorSummary: String {
+        errors.joined(separator: "\n")
+    }
+}
+
+/// Pre-flight validates a generated sing-box config before the core is started
+/// or restarted: a bad node or rule must never silently break the user's
+/// network. Implemented by `ConfigValidator` (Sources/LinkoKit/Validation/),
+/// which shells out to `<binary> check -c <file>` via the injected
+/// `ShellRunning` seam and parses the level-tagged stderr.
+public protocol ConfigValidating: Sendable {
+    /// Runs `<binaryURL> check -c <configFileURL>` and parses the result.
+    /// Never throws: a failure to even launch the checker is reported as an
+    /// error in the returned result so the caller has a single decision point.
+    func validate(configFileURL: URL, binaryURL: URL) -> ConfigValidationResult
+}
+
+// MARK: - Launch at login
+
+/// Status of the app's "launch at login" registration, mirroring the relevant
+/// cases of `SMAppService.Status`.
+public enum LoginItemStatus: Equatable, Sendable {
+    /// Not registered to launch at login.
+    case notRegistered
+    /// Registered and enabled.
+    case enabled
+    /// Registered but the user must approve it in System Settings > General >
+    /// Login Items before it takes effect.
+    case requiresApproval
+    /// The service is not found / unavailable in this build configuration.
+    case notFound
+}
+
+/// Controls the app's "launch at login" registration. Implemented app-side by
+/// an `SMAppService.mainApp` wrapper (declared here so LinkoKit consumers and
+/// `AppState` can depend on the protocol, not the concrete service).
+public protocol LoginItemControlling: Sendable {
+    /// The current registration status.
+    var status: LoginItemStatus { get }
+
+    /// Registers the main app to launch at login. Throws if registration
+    /// fails (the caller surfaces the message and leaves the toggle off).
+    func register() throws
+
+    /// Unregisters the main app from launching at login. Safe to call when
+    /// not registered.
+    func unregister() throws
+}
+
 // MARK: - System proxy
 
 /// Toggles the macOS system proxy (web, secure web, SOCKS) on all enabled

@@ -22,12 +22,6 @@ enum ClashWebSocketStream {
         let task = session.webSocketTask(with: request)
 
         return AsyncThrowingStream<Element, Error> { continuation in
-            // Tearing the socket down on any termination (consumer cancel,
-            // finish, or thrown error) guarantees the connection is closed.
-            continuation.onTermination = { _ in
-                task.cancel(with: .goingAway, reason: nil)
-            }
-
             let pump = Task {
                 task.resume()
                 await receiveLoop(
@@ -38,8 +32,10 @@ enum ClashWebSocketStream {
                 )
             }
 
-            // If the consumer is cancelled, also cancel the receive loop so it
-            // stops awaiting the next frame promptly.
+            // Tearing down on any termination (consumer cancel, finish, or
+            // thrown error) cancels the receive loop so it stops awaiting the
+            // next frame promptly, and cancels the socket so the connection is
+            // always closed — no leaked connections.
             continuation.onTermination = { _ in
                 pump.cancel()
                 task.cancel(with: .goingAway, reason: nil)
