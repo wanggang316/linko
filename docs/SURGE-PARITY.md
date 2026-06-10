@@ -9,7 +9,7 @@
 | Surge 功能 | sing-box 对应 | linko 状态 |
 |---|---|---|
 | 系统代理（HTTP/SOCKS 监听） | mixed inbound + 写系统代理 | ✅ |
-| 增强模式（TUN 虚拟网卡，接管全部流量） | NE PacketTunnelProvider + libbox tun | 🚧 M2 |
+| 增强模式（TUN 虚拟网卡，接管全部流量） | NE PacketTunnelProvider + libbox tun | 🟡 代码完成，待设备联调签名 |
 | 网关 / DHCP / 端口转发 | — | ❌ 非目标 |
 
 ## 2. 规则引擎
