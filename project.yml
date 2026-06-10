@@ -39,6 +39,14 @@ targets:
           if [ -f "$SRC" ]; then
             cp "$SRC" "$DST"
             chmod +x "$DST"
+            # The vendored core ships without hardened runtime, which fails
+            # notarization ("executable does not have the hardened runtime
+            # enabled"). Re-sign it with the build's identity + runtime + a
+            # secure timestamp. Skipped for unsigned/ad-hoc builds.
+            if [ -n "$EXPANDED_CODE_SIGN_IDENTITY" ] && [ "$EXPANDED_CODE_SIGN_IDENTITY" != "-" ]; then
+              codesign --force --options runtime --timestamp \
+                --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$DST"
+            fi
           fi
         outputFiles:
           - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/sing-box
