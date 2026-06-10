@@ -5,16 +5,31 @@ import SwiftUI
 // MARK: - DashboardSection
 // =============================================================================
 
-/// The four observability surfaces selectable from the dashboard sidebar.
-/// Each carries its own SF Symbol and Chinese title so the sidebar and the
-/// detail toolbar stay in sync from a single source of truth.
+/// The surfaces selectable from the dashboard sidebar: four observability
+/// sections plus three routing-management sections (rules / policy groups /
+/// DNS). Each carries its own SF Symbol and Chinese title so the sidebar and
+/// the detail toolbar stay in sync from a single source of truth.
 enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview
     case connections
     case traffic
     case logs
+    case rules
+    case policyGroups
+    case dns
 
     var id: String { rawValue }
+
+    /// Observability sections grouped under "监控".
+    static let monitoringSections: [DashboardSection] = [.overview, .connections, .traffic, .logs]
+    /// Routing-management sections grouped under "路由".
+    static let routingSections: [DashboardSection] = [.rules, .policyGroups, .dns]
+
+    /// Whether this section is a routing-management surface that owns its own
+    /// navigation title and toolbar (so the dashboard chrome must step aside).
+    var isRoutingSection: Bool {
+        Self.routingSections.contains(self)
+    }
 
     /// Sidebar / toolbar title (Chinese, matching the app's tone).
     var title: String {
@@ -23,6 +38,9 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .connections: return "连接"
         case .traffic: return "流量"
         case .logs: return "日志"
+        case .rules: return "规则"
+        case .policyGroups: return "策略组"
+        case .dns: return "DNS"
         }
     }
 
@@ -33,6 +51,9 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .connections: return "point.3.connected.trianglepath.dotted"
         case .traffic: return "chart.xyaxis.line"
         case .logs: return "text.alignleft"
+        case .rules: return "arrow.triangle.branch"
+        case .policyGroups: return "rectangle.3.group"
+        case .dns: return "globe"
         }
     }
 }
@@ -54,9 +75,17 @@ struct DashboardView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail
-                .navigationTitle(selection.title)
-                .toolbar { detailToolbar }
+            // Routing sections own their navigation title and toolbar; the
+            // observability sections share the dashboard chrome (title + live
+            // rate indicator). Applying both would double the title bar, so we
+            // only attach the dashboard chrome for monitoring surfaces.
+            if selection.isRoutingSection {
+                detail
+            } else {
+                detail
+                    .navigationTitle(selection.title)
+                    .toolbar { detailToolbar }
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .task {
@@ -75,7 +104,13 @@ struct DashboardView: View {
     private var sidebar: some View {
         List(selection: $selection) {
             Section("监控") {
-                ForEach(DashboardSection.allCases) { section in
+                ForEach(DashboardSection.monitoringSections) { section in
+                    Label(section.title, systemImage: section.symbolName)
+                        .tag(section)
+                }
+            }
+            Section("路由") {
+                ForEach(DashboardSection.routingSections) { section in
                     Label(section.title, systemImage: section.symbolName)
                         .tag(section)
                 }
@@ -112,6 +147,12 @@ struct DashboardView: View {
             TrafficView()
         case .logs:
             LogsView()
+        case .rules:
+            RulesView()
+        case .policyGroups:
+            PolicyGroupsView()
+        case .dns:
+            DNSSettingsView()
         }
     }
 
