@@ -235,6 +235,11 @@ final class DashboardViewModel: ObservableObject {
         connections = []
         trafficHistory = []
         nextSampleIndex = 0
+        // Cumulative counters are meaningless once the core stops; zero them so
+        // the overview doesn't show stale totals from the previous session.
+        totalDown = 0
+        totalUp = 0
+        memory = 0
     }
 
     // MARK: - Stream application

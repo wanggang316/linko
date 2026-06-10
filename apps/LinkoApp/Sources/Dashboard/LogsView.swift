@@ -1,9 +1,16 @@
+import AppKit
 import LinkoKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The 日志 (Logs) surface: a live, level-colored stream of core log lines with
 /// a severity filter (which re-subscribes the `/logs` socket at the new level),
-/// an autoscroll toggle that follows the tail, and a clear-buffer action.
+/// an autoscroll toggle that follows the tail, an export-to-file action, and a
+/// clear-buffer action.
+///
+/// Rendered as a native `List` so row separators come from the platform (no
+/// hand-rolled `Divider`s) and the pane background matches every other
+/// dashboard surface (no boxes-on-grey).
 struct LogsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var viewModel: DashboardViewModel
@@ -33,22 +40,27 @@ struct LogsView: View {
 
     private var logList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(viewModel.logs.enumerated()), id: \.offset) { index, entry in
-                        LogRow(entry: entry)
-                            .id(index)
-                        Divider()
-                            .opacity(0.4)
-                    }
-                    // Tail anchor for autoscroll.
-                    Color.clear
-                        .frame(height: 1)
-                        .id(tailAnchor)
+            List {
+                ForEach(Array(viewModel.logs.enumerated()), id: \.offset) { index, entry in
+                    LogRow(entry: entry)
+                        .id(index)
+                        .listRowInsets(EdgeInsets(
+                            top: Theme.Spacing.xxs + 1,
+                            leading: Theme.Spacing.md,
+                            bottom: Theme.Spacing.xxs + 1,
+                            trailing: Theme.Spacing.md
+                        ))
+                        .listRowSeparator(.visible)
                 }
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.xs)
+                // Tail anchor for autoscroll: a zero-height, separator-less row.
+                Color.clear
+                    .frame(height: 1)
+                    .id(tailAnchor)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .overlay {
                 if viewModel.logs.isEmpty {
                     DashboardEmptyState(
@@ -91,6 +103,13 @@ struct LogsView: View {
             .toggleStyle(.button)
             .help("自动滚动到最新")
         }
+        ToolbarItem(placement: .automatic) {
+            Button(action: exportLogs) {
+                Label("导出日志", systemImage: "square.and.arrow.up")
+            }
+            .help("导出日志到文件")
+            .disabled(viewModel.logs.isEmpty)
+        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 viewModel.clearLogs()
@@ -100,6 +119,44 @@ struct LogsView: View {
             .help("清空日志")
             .disabled(viewModel.logs.isEmpty)
         }
+    }
+
+    // MARK: - Export
+
+    /// Serializes the visible log buffer to a plain-text file via a save panel.
+    /// Each line is `LEVEL\tpayload`, matching what's on screen.
+    private func exportLogs() {
+        let snapshot = viewModel.logs
+        guard !snapshot.isEmpty else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "导出日志"
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = Self.defaultExportName()
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let text = snapshot
+            .map { entry in
+                let level = entry.type.isEmpty ? "LOG" : entry.type.uppercased()
+                return "\(level)\t\(entry.payload)"
+            }
+            .joined(separator: "\n")
+
+        do {
+            try (text + "\n").write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            appState.lastErrorMessage = "导出日志失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// A timestamped default filename, e.g. `linko-logs-20260610-153045.txt`.
+    private static func defaultExportName() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return "linko-logs-\(formatter.string(from: Date())).txt"
     }
 
     // MARK: - Helpers
@@ -135,7 +192,6 @@ private struct LogRow: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, Theme.Spacing.xxs + 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
