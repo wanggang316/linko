@@ -1,0 +1,30 @@
+name: Linko
+options:
+  bundleIdPrefix: com.gumpw
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  LinkoKit:
+    path: packages/LinkoKit
+
+targets:
+  LinkoApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: apps/LinkoApp
+    dependencies:
+      - package: LinkoKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gumpw.linko
+        PRODUCT_NAME: Linko
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES

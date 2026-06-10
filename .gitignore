@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Xcode / build
+*.xcodeproj
+.build/
+DerivedData/
+build/
+
+# Vendored binaries (downloaded via scripts/fetch-singbox.sh)
+vendor/
+
+# SwiftPM
+.swiftpm/
+Package.resolved
