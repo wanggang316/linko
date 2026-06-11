@@ -3,8 +3,10 @@
 <!--
   Supplementary Info.plist for LinkoApp. GENERATE_INFOPLIST_FILE stays YES, so
   Xcode uses this file as the base and merges the generated / INFOPLIST_KEY_*
-  values on top. It exists only to declare keys the generator can't express —
-  here, the `linko://` URL scheme (CFBundleURLTypes is a structured array).
+  values on top. It declares keys the generator can't express: INFOPLIST_KEY_*
+  build settings only work for Xcode's whitelisted keys — custom keys (the
+  Sparkle SU* family, structured arrays like CFBundleURLTypes) are silently
+  dropped, so they must live here.
 -->
 <plist version="1.0">
 <dict>
@@ -21,5 +23,19 @@
       </array>
     </dict>
   </array>
+  <!--
+    Sparkle auto-update (see docs/RELEASE.md). The canonical appcast is the
+    `releases/latest/download` permalink — always the newest non-prerelease
+    release's appcast.xml, so this URL never changes. The EdDSA public key's
+    private half lives only in the Keychain / CI secret SPARKLE_PRIVATE_KEY.
+  -->
+  <key>SUFeedURL</key>
+  <string>https://github.com/wanggang316/linko/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>1VcZo4wK4/fMLaORR/MB2JBI/N41kAJoYl7qfrYHnp8=</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUScheduledCheckInterval</key>
+  <integer>86400</integer>
 </dict>
 </plist>
