@@ -14,10 +14,14 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
                   port: 8388, password: "pw", method: "aes-256-gcm")
     }
 
-    private func buildJSON(nodes: [ProxyNode], routing: RoutingConfig) throws -> [String: Any] {
+    private func buildData(nodes: [ProxyNode], routing: RoutingConfig) throws -> Data {
         var prefs = AppPreferences()
         prefs.routing = routing
-        let data = try builder.build(nodes: nodes, preferences: prefs)
+        return try builder.build(nodes: nodes, preferences: prefs)
+    }
+
+    private func buildJSON(nodes: [ProxyNode], routing: RoutingConfig) throws -> [String: Any] {
+        let data = try buildData(nodes: nodes, routing: routing)
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
@@ -349,6 +353,138 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertEqual(fakeip["inet4_range"] as? String, "198.18.0.0/15")
         XCTAssertEqual(fakeip["inet6_range"] as? String, "fc00::/18")
         XCTAssertNil(dns["fakeip"])
+    }
+
+    // MARK: - Static hosts (golden)
+
+    func testStaticHostsEmitsHostsServerAndPriorityRule() throws {
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: true,
+                servers: [DNSServer(tag: "dns-proxy", address: "tls://1.1.1.1")],
+                rules: [DNSRule(matcher: .domainSuffix, value: "google.com", server: "dns-proxy")],
+                finalServerTag: "dns-proxy",
+                hosts: [
+                    HostEntry(domain: "router.lan", addresses: "192.168.1.1"),
+                    HostEntry(domain: "nas.lan", addresses: "10.0.0.2, fd00::2"),
+                ]
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+
+        // A single hosts server carries the whole domain→IP map.
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        let hosts = try XCTUnwrap(servers.first { $0["type"] as? String == "hosts" })
+        XCTAssertEqual(hosts["tag"] as? String, "hosts")
+        let predefined = try XCTUnwrap(hosts["predefined"] as? [String: [String]])
+        XCTAssertEqual(predefined["router.lan"], ["192.168.1.1"])
+        XCTAssertEqual(predefined["nas.lan"], ["10.0.0.2", "fd00::2"])
+
+        // The hosts rule is prepended so a static mapping always wins.
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertEqual(dnsRules[0]["server"] as? String, "hosts")
+        XCTAssertEqual(dnsRules[0]["action"] as? String, "route")
+        XCTAssertEqual(dnsRules[0]["domain"] as? [String], ["nas.lan", "router.lan"])
+        // The user's own rule follows it.
+        XCTAssertEqual(dnsRules[1]["server"] as? String, "dns-proxy")
+    }
+
+    func testStaticHostsWorkStandaloneWhenDNSMasterOff() throws {
+        // hosts present but the DNS master switch is off: a minimal dns block is
+        // still emitted (bootstrap local + hosts), so host mapping works alone.
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: false,
+                hosts: [HostEntry(domain: "example.test", addresses: "127.0.0.1")]
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        // Bootstrap local resolver is injected, plus the hosts server.
+        XCTAssertTrue(servers.contains { $0["type"] as? String == "local" })
+        XCTAssertTrue(servers.contains { $0["type"] as? String == "hosts" })
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertEqual(dnsRules.count, 1)
+        XCTAssertEqual(dnsRules[0]["server"] as? String, "hosts")
+        // The route layer wires default_domain_resolver to the bootstrap.
+        let resolver = try XCTUnwrap(try route(in: config)["default_domain_resolver"] as? [String: Any])
+        XCTAssertEqual(resolver["server"] as? String, "dns-local")
+    }
+
+    func testStaticHostsSkipInvalidAndDisabledEntries() throws {
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: false,
+                hosts: [
+                    HostEntry(domain: "ok.lan", addresses: "1.2.3.4"),
+                    HostEntry(domain: "disabled.lan", addresses: "1.1.1.1", isEnabled: false),
+                    HostEntry(domain: "no-ip.lan", addresses: "not-an-ip"),
+                    HostEntry(domain: "", addresses: "9.9.9.9"),
+                ]
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        let hosts = try XCTUnwrap(servers.first { $0["type"] as? String == "hosts" })
+        let predefined = try XCTUnwrap(hosts["predefined"] as? [String: [String]])
+        XCTAssertEqual(Set(predefined.keys), ["ok.lan"])
+    }
+
+    func testNoHostsServerWhenNoneValid() throws {
+        // No valid hosts and DNS off → no dns block at all (pre-M3 behavior).
+        let routing = RoutingConfig(
+            dns: DNSConfig(isEnabled: false, hosts: [HostEntry(domain: "x.lan", addresses: "bad")])
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        XCTAssertNil(config["dns"])
+    }
+
+    func testHostsServerTagAvoidsUserServerCollision() throws {
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: true,
+                servers: [DNSServer(tag: "hosts", address: "tls://1.1.1.1")],
+                finalServerTag: "hosts",
+                hosts: [HostEntry(domain: "a.lan", addresses: "1.1.1.1")]
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        // The user's "hosts"-tagged upstream is untouched; the synthesized
+        // hosts server takes a non-colliding tag.
+        let synthesized = try XCTUnwrap(servers.first { $0["type"] as? String == "hosts" })
+        XCTAssertEqual(synthesized["tag"] as? String, "hosts-2")
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertEqual(dnsRules[0]["server"] as? String, "hosts-2")
+    }
+
+    func testStaticHostsConfigValidatesAgainstSingBox() throws {
+        let binary = URL(fileURLWithPath:
+            "/Users/wanggang/dev/00/linko/vendor/sing-box/sing-box")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: binary.path),
+                          "sing-box binary not available")
+        // Standalone hosts (DNS master off) must produce a config the real core
+        // accepts — this is the schema class that bit us before (DNS legacy).
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: false,
+                hosts: [
+                    HostEntry(domain: "router.lan", addresses: "192.168.1.1"),
+                    HostEntry(domain: "nas.lan", addresses: "10.0.0.2, fd00::2"),
+                ]
+            )
+        )
+        let data = try buildData(nodes: [ssNode("A")], routing: routing)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("linko-hosts-\(UUID().uuidString).json")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = ConfigValidator().validate(configFileURL: url, binaryURL: binary)
+        XCTAssertTrue(result.isValid, "errors: \(result.errors)")
     }
 
     // MARK: - Transport / TLS / Reality / plugin outbounds (golden)

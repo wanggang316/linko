@@ -18,6 +18,9 @@ struct DNSSettingsView: View {
     var body: some View {
         Form {
             masterSection
+            // Static host mappings work standalone (no upstream servers needed),
+            // so the editor is always available — even with DNS turned off.
+            hostsSection
             if dns.isEnabled {
                 serversSection
                 strategySection
@@ -76,6 +79,36 @@ struct DNSSettingsView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Static hosts
+
+    private var hostsSection: some View {
+        Section {
+            if dns.hosts.isEmpty {
+                Text("尚无本地映射。例如：router.lan → 192.168.1.1。")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.secondaryLabel)
+            }
+            ForEach(dns.hosts) { host in
+                HostEntryRow(
+                    host: host,
+                    onChange: { updated in updateHost(updated) },
+                    onDelete: { deleteHost(host) }
+                )
+            }
+            Button {
+                addHost()
+            } label: {
+                Label("添加映射", systemImage: "plus")
+            }
+        } header: {
+            Text("本地 Hosts 映射")
+        } footer: {
+            Text("把域名直接指向固定 IP，优先级高于所有上游解析。地址支持 IPv4 / IPv6，多个用逗号分隔。无需开启上方 DNS 配置即可生效。")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.secondaryLabel)
+        }
     }
 
     // MARK: - Servers
@@ -267,6 +300,28 @@ struct DNSSettingsView: View {
         }
     }
 
+    // MARK: - Host mutations
+
+    private func addHost() {
+        apply { config in
+            config.hosts.append(HostEntry(domain: "", addresses: ""))
+        }
+    }
+
+    private func updateHost(_ host: HostEntry) {
+        apply { config in
+            if let index = config.hosts.firstIndex(where: { $0.id == host.id }) {
+                config.hosts[index] = host
+            }
+        }
+    }
+
+    private func deleteHost(_ host: HostEntry) {
+        apply { config in
+            config.hosts.removeAll { $0.id == host.id }
+        }
+    }
+
     // MARK: - Commit
 
     /// Mutates the DNS config in place and persists the whole preferences value.
@@ -375,6 +430,62 @@ private struct DNSServerRow: View {
             get: { server.detour ?? "" },
             set: { var s = server; s.detour = $0.isEmpty ? nil : $0; onChange(s) }
         )
+    }
+}
+
+// =============================================================================
+// MARK: - Host row
+// =============================================================================
+
+/// One editable static-host row: an exact domain, its comma-separated IP
+/// literals, an enable toggle, and a delete button.
+private struct HostEntryRow: View {
+    let host: HostEntry
+    let onChange: (HostEntry) -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                TextField("域名（router.lan）", text: domainBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.Font.monoSmall)
+                    .frame(width: 180)
+                Toggle("", isOn: enabledBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .help(host.isEnabled ? "已启用" : "已停用")
+                Spacer()
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Theme.Color.error)
+            }
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "arrow.right")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Color.tertiaryLabel)
+                TextField("IP 地址，逗号分隔（127.0.0.1, ::1）", text: addressesBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.Font.monoSmall)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xxs)
+        .opacity(host.isEnabled ? 1 : 0.5)
+    }
+
+    private var domainBinding: Binding<String> {
+        Binding(get: { host.domain }, set: { var h = host; h.domain = $0; onChange(h) })
+    }
+
+    private var addressesBinding: Binding<String> {
+        Binding(get: { host.addresses }, set: { var h = host; h.addresses = $0; onChange(h) })
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(get: { host.isEnabled }, set: { var h = host; h.isEnabled = $0; onChange(h) })
     }
 }
 

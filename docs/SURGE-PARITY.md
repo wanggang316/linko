@@ -47,7 +47,7 @@
 | 自定义 DNS / DoH / DoT / DoQ | ✅（1.12+ typed-server 格式 + default_domain_resolver） |
 | DNS 分流规则 | ✅（action-based rules） |
 | fake-ip | ⏳ 随 M2 TUN 启用 |
-| 本地映射 / hosts | ⏳ M4 |
+| 本地映射 / hosts | ✅（sing-box `type:"hosts"` 预定义服务器 + 高优先级精确域名规则；DNS 关闭时也可独立生效） |
 
 ## 5. 可观测性
 

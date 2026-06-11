@@ -112,6 +112,55 @@ public struct DNSRule: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// A static domain→address mapping, the equivalent of an `/etc/hosts` entry,
+/// compiled into a sing-box `{type: "hosts"}` DNS server (1.12+). The mapped
+/// domains are routed to that server by a high-priority rule, so they resolve
+/// locally and bypass every upstream resolver — exactly Surge's `[Host]` block.
+///
+/// See https://sing-box.sagernet.org/configuration/dns/server/hosts/
+public struct HostEntry: Codable, Hashable, Identifiable, Sendable {
+    public var id: UUID
+    /// The exact domain to map (no wildcards), e.g. `router.lan`.
+    public var domain: String
+    /// Comma-separated IP literals (IPv4/IPv6) the domain resolves to,
+    /// e.g. `192.168.1.1` or `127.0.0.1, ::1`.
+    public var addresses: String
+    public var isEnabled: Bool
+
+    public init(
+        id: UUID = UUID(),
+        domain: String = "",
+        addresses: String = "",
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.domain = domain
+        self.addresses = addresses
+        self.isEnabled = isEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.domain = try c.decodeIfPresent(String.self, forKey: .domain) ?? ""
+        self.addresses = try c.decodeIfPresent(String.self, forKey: .addresses) ?? ""
+        self.isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
+
+    /// The trimmed, non-empty domain, or `nil` when blank.
+    public var trimmedDomain: String? {
+        let v = domain.trimmingCharacters(in: .whitespaces)
+        return v.isEmpty ? nil : v
+    }
+
+    /// Parsed, trimmed, non-empty address tokens.
+    public var addressList: [String] {
+        addresses.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+}
+
 /// FakeIP settings, mapped to `dns.fakeip`. Off by default in system-proxy
 /// mode; intended to pair with TUN (M2).
 ///
@@ -163,6 +212,11 @@ public struct DNSConfig: Codable, Hashable, Sendable {
     public var disableCache: Bool
     /// `dns.fakeip`.
     public var fakeIP: FakeIPConfig
+    /// Static domain→IP mappings (the `[Host]` block). Compiled into a
+    /// `{type: "hosts"}` server plus a high-priority routing rule. Non-empty
+    /// `hosts` makes the builder emit a `dns` block even when `isEnabled` is
+    /// `false`, so host mapping works standalone.
+    public var hosts: [HostEntry]
 
     public init(
         isEnabled: Bool = false,
@@ -171,7 +225,8 @@ public struct DNSConfig: Codable, Hashable, Sendable {
         finalServerTag: String? = nil,
         strategy: DNSStrategy? = nil,
         disableCache: Bool = false,
-        fakeIP: FakeIPConfig = .disabled
+        fakeIP: FakeIPConfig = .disabled,
+        hosts: [HostEntry] = []
     ) {
         self.isEnabled = isEnabled
         self.servers = servers
@@ -180,6 +235,7 @@ public struct DNSConfig: Codable, Hashable, Sendable {
         self.strategy = strategy
         self.disableCache = disableCache
         self.fakeIP = fakeIP
+        self.hosts = hosts
     }
 
     /// Empty/disabled DNS — the builder emits nothing and the core defaults
@@ -213,5 +269,6 @@ public struct DNSConfig: Codable, Hashable, Sendable {
         self.strategy = try c.decodeIfPresent(DNSStrategy.self, forKey: .strategy)
         self.disableCache = try c.decodeIfPresent(Bool.self, forKey: .disableCache) ?? false
         self.fakeIP = try c.decodeIfPresent(FakeIPConfig.self, forKey: .fakeIP) ?? .disabled
+        self.hosts = try c.decodeIfPresent([HostEntry].self, forKey: .hosts) ?? []
     }
 }

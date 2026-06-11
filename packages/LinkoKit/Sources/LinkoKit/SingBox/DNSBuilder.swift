@@ -27,10 +27,18 @@ struct DNSBuilder {
         var resolverTag: String
     }
 
-    /// Returns the `dns` block + resolver tag, or `nil` when DNS is disabled
-    /// (no block emitted, so the caller must not set `default_domain_resolver`).
+    /// Reserved base tag for the synthesized static-hosts server.
+    static let hostsServerTag = "hosts"
+
+    /// Returns the `dns` block + resolver tag, or `nil` when DNS is disabled and
+    /// no static hosts are defined (no block emitted, so the caller must not set
+    /// `default_domain_resolver`). Non-empty static `hosts` produce a block even
+    /// when the master switch is off, so host mapping works on its own.
     func dnsResult(for config: DNSConfig) -> Result? {
-        guard config.isEnabled else { return nil }
+        // Static host mappings reduced to {domain: [ip,...]}, keeping only
+        // enabled entries with a domain and at least one IP literal.
+        let hostMap = hostPredefinedMap(config.hosts)
+        guard config.isEnabled || !hostMap.isEmpty else { return nil }
 
         var servers: [[String: Any]] = []
 
@@ -63,11 +71,35 @@ struct DNSBuilder {
             ])
         }
 
+        // Static hosts: a single `{type: "hosts"}` server carrying the whole
+        // domain→IP map. Its tag is uniqued against the user's server tags so a
+        // user server literally named "hosts" can't collide with it.
+        var hostsRule: [String: Any]?
+        if !hostMap.isEmpty {
+            let usedTags = Set(config.servers.map(\.tag))
+            let hostsTag = uniqueTag(Self.hostsServerTag, avoiding: usedTags)
+            servers.append([
+                "type": "hosts",
+                "tag": hostsTag,
+                "predefined": hostMap,
+            ])
+            // Route exactly the mapped domains to the hosts server. This rule is
+            // prepended so a static mapping always wins over upstream resolvers.
+            hostsRule = [
+                "action": "route",
+                "server": hostsTag,
+                "domain": Array(hostMap.keys).sorted(),
+            ]
+        }
+
         var dns: [String: Any] = ["servers": servers]
 
-        let rules = config.rules
+        var rules = config.rules
             .filter(\.isEnabled)
             .compactMap(ruleObject(for:))
+        if let hostsRule {
+            rules.insert(hostsRule, at: 0)
+        }
         if !rules.isEmpty {
             dns["rules"] = rules
         }
@@ -227,6 +259,32 @@ struct DNSBuilder {
         }
 
         return object
+    }
+
+    // MARK: - Static hosts
+
+    /// Reduces the configured `HostEntry` list to a sing-box `predefined` map
+    /// (`{domain: [ip,...]}`), keeping only enabled entries that carry a domain
+    /// and at least one IP literal. Later entries for the same domain win (the
+    /// UI presents them top-down). Non-IP addresses are dropped — the `hosts`
+    /// server only answers with literal addresses, never CNAMEs.
+    private func hostPredefinedMap(_ hosts: [HostEntry]) -> [String: [String]] {
+        var map: [String: [String]] = [:]
+        for entry in hosts where entry.isEnabled {
+            guard let domain = entry.trimmedDomain else { continue }
+            let ips = entry.addressList.filter(isIPLiteral)
+            guard !ips.isEmpty else { continue }
+            map[domain] = ips
+        }
+        return map
+    }
+
+    /// Returns `base` if free, else `base-2`, `base-3`, … avoiding `taken`.
+    private func uniqueTag(_ base: String, avoiding taken: Set<String>) -> String {
+        guard taken.contains(base) else { return base }
+        var n = 2
+        while taken.contains("\(base)-\(n)") { n += 1 }
+        return "\(base)-\(n)"
     }
 
     // MARK: - Helpers
