@@ -171,11 +171,20 @@ cmd_appcast() {
   rm -rf "${feed_dir}"
   mkdir -p "${feed_dir}"
   /bin/cp "${dmg_path}" "${feed_dir}/"
-  # Progress goes to stderr so a failure here is visible in CI logs.
-  "${generate_appcast}" \
-    --download-url-prefix "https://github.com/${repo}/releases/download/v${version}/" \
-    --maximum-versions 5 \
-    "${feed_dir}" >&2
+  # Now that the app embeds SUPublicEDKey, generate_appcast verifies it has
+  # the matching private key and HARD-FAILS without one (its errors go to
+  # stdout, hence >&2 keeps everything visible). Feed it the key from the
+  # env (CI secret) when present; locally it finds the key in the Keychain.
+  local appcast_args=(
+    --download-url-prefix "https://github.com/${repo}/releases/download/v${version}/"
+    --maximum-versions 5
+    "${feed_dir}"
+  )
+  if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
+    printf '%s' "${SPARKLE_PRIVATE_KEY}" | "${generate_appcast}" --ed-key-file - "${appcast_args[@]}" >&2
+  else
+    "${generate_appcast}" "${appcast_args[@]}" >&2
+  fi
 
   # generate_appcast builds the feed but, on current macOS / this Sparkle
   # build, does not embed sparkle:edSignature (verified: it signs nothing for
