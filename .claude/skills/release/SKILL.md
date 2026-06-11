@@ -59,7 +59,7 @@ checks them in pre-flight and bails with the fix command if any is missing.
 |---|---|
 | Marketing version + build number | `project.yml` → top-level `settings.base` → `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` (YYYYMMDDNNN). Shared by the app and the embedded system extension. |
 | Bump tool | `scripts/bump-version.sh` (via `make bump-version VERSION=X.Y.Z`) — rewrites project.yml atomically and runs `xcodegen generate` |
-| User-visible changelog | `CHANGELOG.md` (repo root) — entries written in **Chinese** (Linko's UI and Sparkle update dialog are Chinese) |
+| User-visible changelog | `CHANGELOG.md` (repo root) — entries written in **English** |
 | Release pipeline | `scripts/release.sh` via `make release` (archive → notarize → DMG → notarize → appcast) |
 | Tag format | `vX.Y.Z`, annotated |
 | Distribution unit | DMG (notarized + stapled). Sparkle clients update from it. |
@@ -125,14 +125,14 @@ Bail with a clear message if any of these are wrong:
 If `[Unreleased]` is empty (only category headers, no entries), **stop** and
 ask the user to record what shipped, then resume.
 
-**Writing style — user-facing, in Chinese.** The CHANGELOG follows
-[Keep a Changelog 1.1.0](https://keepachangelog.com/zh-CN/1.1.0/) — entries
-are *for humans*. Rewrite raw commit messages; never paste them. Each entry
+**Writing style — user-facing, in English.** The CHANGELOG follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) — entries are
+*for humans*. Rewrite raw commit messages; never paste them. Each entry
 doubles as the text shown in Sparkle's update dialog.
 
-Six standard categories: `Added` (新功能) / `Changed` (现有功能的改动) /
-`Deprecated` (将移除、当前仍可用) / `Removed` (本版移除) / `Fixed` (修复) /
-`Security` (安全修复).
+Six standard categories: `Added` (new features) / `Changed` (changes to
+existing behavior) / `Deprecated` (going away, still works) / `Removed` (gone
+this version) / `Fixed` (bug fixes) / `Security` (vulnerability fixes).
 
 Bullet rules, in priority order (earlier wins on conflict):
 
@@ -146,7 +146,7 @@ Bullet rules, in priority order (earlier wins on conflict):
    describe the impact) and deprecations/removals/breaking changes.
 4. **Drop developer jargon.** No commit prefixes, PR/issue numbers, hashes,
    module or type names, protocol terms. Refer to features by the UI surface
-   the user sees (「设置 › 关于」、「菜单栏」).
+   the user sees ("Settings → About", "the menu bar").
 5. **Consolidate within a release.** Fold commits that chased the same
    bug/feature into one entry naming the end state; bundle tiny polish into
    one bullet.
@@ -226,7 +226,7 @@ Failure modes below.
 git tag -a vX.Y.Z -m "$(cat <<'EOF'
 vX.Y.Z
 
-<one short paragraph in user-facing Chinese summarizing the release —
+<one short paragraph in user-facing English summarizing the release —
 what's new / improved / fixed, pulled from the CHANGELOG, no mechanism>
 EOF
 )"
