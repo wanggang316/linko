@@ -199,6 +199,20 @@ final class AppState: ObservableObject {
         locateSingBoxBinary() != nil
     }
 
+    /// Kills any lingering sing-box process launched from `binaryURL` — an
+    /// orphan left behind when a previous app instance crashed or was
+    /// force-killed before it could stop its child. Without this, the orphan
+    /// keeps holding the inbound port and the next start fails to bind. Matches
+    /// on the exact binary path so it never touches an unrelated sing-box (e.g.
+    /// a Homebrew install the user runs separately).
+    private static func terminateStaleCore(binaryURL: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        process.arguments = ["-f", binaryURL.path]
+        try? process.run()
+        process.waitUntilExit()
+    }
+
     // MARK: - Proxy toggle (mode-aware)
 
     /// The single on/off entry point for the menu switch, dispatched by the
@@ -312,6 +326,11 @@ final class AppState: ObservableObject {
                 lastErrorMessage = "配置校验未通过，已阻止启动：\(validation.errorSummary)"
                 return
             }
+            // If a previous run crashed (or was force-killed), its sing-box
+            // child is orphaned and still holds the inbound port, so a fresh
+            // start would fail with "address already in use". Reap any stale
+            // instance of our own binary before launching.
+            Self.terminateStaleCore(binaryURL: binaryURL)
             try coreRunner.start(binaryURL: binaryURL, configFileURL: configFileURL, logFileURL: logFileURL)
             coreState = coreRunner.state
             try systemProxy.enable(host: "127.0.0.1", port: preferences.mixedPort)
