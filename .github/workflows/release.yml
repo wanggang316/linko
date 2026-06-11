@@ -52,6 +52,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: false
 
       - name: Verify tag matches project version
         run: |
@@ -73,6 +74,8 @@ jobs:
         run: ./scripts/build-libbox.sh
 
       - name: Fetch sing-box core
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make fetch-core
 
       - name: Import Developer ID certificate

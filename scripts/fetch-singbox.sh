@@ -22,8 +22,17 @@ case "$(uname -m)" in
 esac
 
 # --- fetch release metadata ----------------------------------------------
+# Authenticate the GitHub API call when a token is available (GITHUB_TOKEN /
+# GH_TOKEN). Unauthenticated requests are capped at 60/hour per IP, which CI
+# runners on shared IPs hit immediately (HTTP 403). Local runs without a token
+# use the unauthenticated path, which is fine for a single developer.
 echo "Querying latest sing-box release (darwin-$ARCH)..."
-RELEASE_JSON="$(curl -fsSL "$API_URL")"
+GH_API_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [ -n "$GH_API_TOKEN" ]; then
+    RELEASE_JSON="$(curl -fsSL -H "Authorization: Bearer $GH_API_TOKEN" "$API_URL")"
+else
+    RELEASE_JSON="$(curl -fsSL "$API_URL")"
+fi
 
 if command -v jq >/dev/null 2>&1; then
     TAG="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name')"
