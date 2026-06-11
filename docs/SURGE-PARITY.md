@@ -25,7 +25,7 @@
 | FINAL | route.final | ✅ |
 | 规则编辑器（增删 / 拖拽排序） | — | ✅ |
 | 导入 Surge / Clash 规则 | — | ✅ |
-| SUBNET（按网络环境切换策略） | 客户端层实现 | ⏳ M4 |
+| SUBNET（按网络环境切换策略） | 客户端层实现（NetworkMonitor + 按子网/接口切换 Profile） | ✅ |
 
 ## 3. 策略系统
 
@@ -89,4 +89,5 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
   报 “Extension not found in App bundle”（bundle 已验证与可用扩展逐位对等、OS 认可为系统扩展），
   疑似 26.5 + Xcode 26.5 SDK 的系统级问题，非代码缺陷。见 docs/M2-DEVICE-TEST.md。
 - **M4（已交付）**：WireGuard/SSH 出站、多 Profile、按 App 流量统计、Sparkle 自动更新（待发布基建）。
-- **剩余**：SUBNET 按网络环境切换、hosts 本地映射、fake-ip（随 TUN）、CLI/HTTP API/URL Scheme。
+- **轻量收尾（已交付）**：hosts 本地映射、`linko://` URL Scheme + `scripts/linko` CLI、SUBNET 按网络环境切换（按子网/接口自动切换 Profile）。
+- **剩余**：fake-ip（随 TUN）、独立 HTTP 控制服务（如有需要）。

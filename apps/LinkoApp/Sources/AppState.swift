@@ -37,6 +37,13 @@ final class AppState: ObservableObject {
     @Published private(set) var nodeDelays: [UUID: Int] = [:]
     /// Last error/notice message surfaced in the menu, if any.
     @Published var lastErrorMessage: String?
+    /// Global network-based auto-switch configuration (rules mapping the current
+    /// network to a profile). Persisted separately from any profile.
+    @Published private(set) var networkSwitch: NetworkSwitchConfig
+    /// The latest detected network environment, surfaced in the switch editor so
+    /// the user can see what their rules will match against. `nil` until the
+    /// path monitor reports its first update.
+    @Published private(set) var currentNetwork: NetworkSnapshot?
 
     // MARK: - Dependencies
 
@@ -67,6 +74,9 @@ final class AppState: ObservableObject {
     /// survives across turns and is cancelled/rescheduled on pref changes.
     private let autoUpdateScheduler = AutoUpdateScheduler()
 
+    /// Watches the active network and drives network-based profile switching.
+    private let networkMonitor = NetworkMonitor()
+
     // MARK: - Multi-profile state
 
     /// The on-disk multi-profile store (`<support>/profiles/`).
@@ -86,6 +96,7 @@ final class AppState: ObservableObject {
     private var subscriptionsFileURL: URL { supportDirectoryURL.appendingPathComponent("subscriptions.json") }
     private var configFileURL: URL { supportDirectoryURL.appendingPathComponent("config.json") }
     private var logFileURL: URL { supportDirectoryURL.appendingPathComponent("core.log") }
+    private var networkSwitchFileURL: URL { supportDirectoryURL.appendingPathComponent("network-switch.json") }
 
     // MARK: - Init
 
@@ -126,6 +137,15 @@ final class AppState: ObservableObject {
         // the legacy single-config `preferences.json`/`subscriptions.json` are
         // folded losslessly into one active "默认" profile by the store, which
         // we then persist so subsequent launches read from `profiles/`.
+        // The global network-switch config persists on its own (it selects
+        // between profiles, so it can't live inside one). Absent ⇒ disabled.
+        self.networkSwitch = Self.loadJSON(
+            NetworkSwitchConfig.self,
+            from: supportDirectoryURL.appendingPathComponent("network-switch.json"),
+            what: "网络环境切换",
+            notices: &loadNotices
+        ) ?? .disabled
+
         let store = ProfileStore(supportDirectoryURL: supportDirectoryURL)
         let collection = store.load(
             legacyPreferences: loadedPreferences,
@@ -177,6 +197,13 @@ final class AppState: ObservableObject {
         // it enabled in a previous session.
         rescheduleAutoUpdate()
 
+        // Begin watching the network so network-based profile switching can
+        // react to environment changes. The callback is a no-op while the
+        // feature is off, so this is safe to start unconditionally.
+        networkMonitor.onChange = { [weak self] snapshot in
+            self?.handleNetworkChange(snapshot)
+        }
+        networkMonitor.start()
     }
 
     static func defaultSupportDirectoryURL() -> URL {
@@ -573,6 +600,7 @@ final class AppState: ObservableObject {
         // also stops itself when the app process exits, but stopping
         // explicitly restores the network promptly on a clean quit.
         tunnelController.stop()
+        networkMonitor.stop()
         coreState = .stopped
     }
 
@@ -707,6 +735,65 @@ final class AppState: ObservableObject {
         } catch {
             lastErrorMessage = (error as? AppError)?.message ?? "导入订阅失败：\(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Network-based profile switching
+
+    /// Reacts to a network environment change: records it for the UI, then
+    /// re-evaluates the switch rules. Switching is app-level — sing-box has no
+    /// SUBNET primitive — so a matching rule swaps the whole active profile.
+    private func handleNetworkChange(_ snapshot: NetworkSnapshot) {
+        currentNetwork = snapshot
+        applyNetworkSwitch()
+    }
+
+    /// Evaluates the switch rules against the current network and switches to
+    /// the matched profile when it differs from the active one. A no-op while
+    /// the feature is off, no network is known yet, nothing matches, or the
+    /// target profile no longer exists.
+    private func applyNetworkSwitch() {
+        guard networkSwitch.isEnabled, let snapshot = currentNetwork else { return }
+        guard let targetID = NetworkSwitchEvaluator.matchedProfileID(
+            rules: networkSwitch.rules, snapshot: snapshot
+        ) else { return }
+        guard targetID != activeProfileID,
+              profileSummaries.contains(where: { $0.id == targetID })
+        else { return }
+        Task { await switchProfile(id: targetID) }
+    }
+
+    /// Turns network-based switching on/off. Enabling re-evaluates immediately
+    /// against the current network so the right profile applies right away.
+    func setNetworkSwitchEnabled(_ enabled: Bool) {
+        guard networkSwitch.isEnabled != enabled else { return }
+        networkSwitch.isEnabled = enabled
+        persistNetworkSwitch()
+        if enabled { applyNetworkSwitch() }
+    }
+
+    /// Appends a switch rule and persists.
+    func addNetworkSwitchRule(_ rule: NetworkSwitchRule) {
+        networkSwitch.rules.append(rule)
+        persistNetworkSwitch()
+        applyNetworkSwitch()
+    }
+
+    /// Replaces the rule with the same id, persists, and re-evaluates.
+    func updateNetworkSwitchRule(_ rule: NetworkSwitchRule) {
+        guard let index = networkSwitch.rules.firstIndex(where: { $0.id == rule.id }) else { return }
+        networkSwitch.rules[index] = rule
+        persistNetworkSwitch()
+        applyNetworkSwitch()
+    }
+
+    /// Removes the rule with `id` and persists.
+    func deleteNetworkSwitchRule(id: UUID) {
+        networkSwitch.rules.removeAll { $0.id == id }
+        persistNetworkSwitch()
+    }
+
+    private func persistNetworkSwitch() {
+        persistJSON(networkSwitch, to: networkSwitchFileURL, what: "网络环境切换")
     }
 
     // MARK: - Delay testing

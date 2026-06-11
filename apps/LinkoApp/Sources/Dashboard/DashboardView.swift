@@ -16,6 +16,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case apps
     case logs
     case profiles
+    case networkSwitch
     case subscriptions
     case nodes
     case rules
@@ -27,7 +28,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     /// Observability sections grouped under "监控".
     static let monitoringSections: [DashboardSection] = [.overview, .connections, .traffic, .apps, .logs]
     /// Profile-management sections grouped under "配置".
-    static let profileSections: [DashboardSection] = [.profiles]
+    static let profileSections: [DashboardSection] = [.profiles, .networkSwitch]
     /// Subscription/node sections grouped under "订阅".
     static let subscriptionSections: [DashboardSection] = [.subscriptions, .nodes]
     /// Routing-management sections grouped under "路由".
@@ -52,6 +53,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .apps: return "应用"
         case .logs: return "日志"
         case .profiles: return "配置"
+        case .networkSwitch: return "网络环境"
         case .subscriptions: return "订阅"
         case .nodes: return "节点"
         case .rules: return "规则"
@@ -69,6 +71,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .apps: return "square.grid.3x3.fill"
         case .logs: return "text.alignleft"
         case .profiles: return "rectangle.stack"
+        case .networkSwitch: return "wifi.router"
         case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .nodes: return "point.3.connected.trianglepath.dotted"
         case .rules: return "arrow.triangle.branch"
@@ -183,6 +186,8 @@ struct DashboardView: View {
             LogsView()
         case .profiles:
             ProfilesView()
+        case .networkSwitch:
+            NetworkSwitchView()
         case .subscriptions:
             SubscriptionsView()
         case .nodes:
