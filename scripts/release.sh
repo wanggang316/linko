@@ -7,7 +7,8 @@
 #               .app from the xcarchive + re-sign nested ad-hoc helpers
 #   notarize    submit a path (.app or .dmg) to Apple notary, wait, staple
 #   dmg         package the exported .app into a signed DMG
-#   release     archive -> notarize app -> dmg -> notarize dmg
+#   appcast     generate a signed appcast.xml for the built DMG
+#   release     archive -> notarize app -> dmg -> notarize dmg -> appcast
 #
 # Usage:
 #   ./scripts/release.sh archive
@@ -29,6 +30,7 @@ srcroot="$(cd "${script_dir}/.." && pwd)"
 
 project="${srcroot}/Linko.xcodeproj"
 scheme="LinkoApp"
+repo="wanggang316/linko"
 release_dir="${srcroot}/.build/release"
 archive_path="${release_dir}/Linko.xcarchive"
 export_dir="${release_dir}/export"
@@ -38,7 +40,41 @@ die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
 
 print_usage() {
-  sed -n '3,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  cat <<'EOF'
+release.sh — orchestrate Linko's Developer ID release pipeline.
+
+Subcommands:
+  archive     xcodegen generate + xcodebuild archive + extract the signed
+              .app from the xcarchive + re-sign nested ad-hoc helpers
+  notarize    submit a path (.app or .dmg) to Apple notary, wait, staple
+  dmg         package the exported .app into a signed DMG
+  appcast     generate a signed appcast.xml for the built DMG
+  release     archive -> notarize app -> dmg -> notarize dmg -> appcast
+
+Usage:
+  ./scripts/release.sh release            # full pipeline
+  ./scripts/release.sh archive            # just build + sign
+  ./scripts/release.sh appcast [version]  # regenerate the feed for a DMG
+
+Signing is driven by project.yml (Manual + Developer ID + the
+"Linko DeveloperID"/"LinkoTunnel DeveloperID" provisioning profiles).
+appcast signs each item with the EdDSA private key in the login Keychain;
+override the tools dir with SPARKLE_BIN if generate_appcast isn't found.
+EOF
+}
+
+# Locate Sparkle's generate_appcast: prefer $SPARKLE_BIN, else the SPM
+# artifact resolved into DerivedData.
+resolve_generate_appcast() {
+  if [ -n "${SPARKLE_BIN:-}" ] && [ -x "${SPARKLE_BIN}/generate_appcast" ]; then
+    printf '%s' "${SPARKLE_BIN}/generate_appcast"
+    return
+  fi
+  local tool
+  tool="$(find "${HOME}/Library/Developer/Xcode/DerivedData" \
+    -path "*artifacts*sparkle*bin/generate_appcast" 2>/dev/null | head -1)"
+  [ -n "${tool}" ] || die "generate_appcast not found. Build once (so SPM resolves Sparkle) or set SPARKLE_BIN."
+  printf '%s' "${tool}"
 }
 
 # Developer ID Application identity SHA-1 (exact fingerprint avoids ambiguity
@@ -116,6 +152,30 @@ cmd_dmg() {
   printf '%s\n' "${dmg_path}"
 }
 
+cmd_appcast() {
+  local version="${1:-$(read_marketing_version)}"
+  local dmg_path="${release_dir}/Linko-${version}.dmg"
+  [ -f "${dmg_path}" ] || die "missing ${dmg_path}. Run release.sh dmg first."
+  local tool
+  tool="$(resolve_generate_appcast)"
+
+  # Stage just this DMG so generate_appcast emits a single signed item whose
+  # enclosure points at the GitHub release asset (the canonical feed served
+  # from releases/latest/download/appcast.xml re-attaches this file). The
+  # EdDSA signature is produced from the private key in the login Keychain.
+  local feed_dir="${release_dir}/feed"
+  rm -rf "${feed_dir}"
+  mkdir -p "${feed_dir}"
+  /bin/cp "${dmg_path}" "${feed_dir}/"
+  "${tool}" \
+    --download-url-prefix "https://github.com/${repo}/releases/download/v${version}/" \
+    --maximum-versions 5 \
+    "${feed_dir}"
+  /bin/cp "${feed_dir}/appcast.xml" "${release_dir}/appcast.xml"
+  log "appcast: ${release_dir}/appcast.xml"
+  printf '%s\n' "${release_dir}/appcast.xml"
+}
+
 cmd_release() {
   cmd_archive
   log "notarizing app"
@@ -127,7 +187,10 @@ cmd_release() {
   cmd_dmg "${version}" >/dev/null
   log "notarizing DMG"
   "${script_dir}/notarize.sh" "${dmg_path}"
+  log "generating appcast"
+  cmd_appcast "${version}" >/dev/null
   log "release ready: ${dmg_path}"
+  log "          and: ${release_dir}/appcast.xml"
 }
 
 main() {
@@ -135,6 +198,7 @@ main() {
     archive) shift; cmd_archive "$@" ;;
     notarize) shift; cmd_notarize "$@" ;;
     dmg) shift; cmd_dmg "$@" ;;
+    appcast) shift; cmd_appcast "$@" ;;
     release) shift; cmd_release "$@" ;;
     -h | --help | help | "") print_usage ;;
     *) die "unknown subcommand: ${1}. Run release.sh --help." ;;
