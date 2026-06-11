@@ -177,15 +177,15 @@ private struct ModeSection: View {
             if appState.preferences.proxyMode == .tun {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("首次启用需在系统设置中批准扩展")
+                        Text("TUN 为实验性功能")
                             .foregroundStyle(Theme.Color.label)
-                        Text("系统设置 › 通用 › 登录项与扩展 › 网络扩展。批准后 TUN 会接管全部网络流量，覆盖不走系统代理的应用。")
+                        Text("系统扩展在 macOS 26 上的全新激活存在已知系统级问题，可能无法加载（报“Extension not found”）。日常请使用「系统代理」模式；TUN 在 macOS 15 等系统上可正常工作，首次启用需在「系统设置 › 通用 › 登录项与扩展 › 网络扩展」批准。")
                             .font(Theme.Font.caption)
                             .foregroundStyle(Theme.Color.secondaryLabel)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } icon: {
-                    Image(systemName: "shield.lefthalf.filled")
+                    Image(systemName: "flask")
                         .foregroundStyle(Theme.Color.warning)
                 }
             }

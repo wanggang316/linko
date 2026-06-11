@@ -9,7 +9,7 @@
 | Surge 功能 | sing-box 对应 | linko 状态 |
 |---|---|---|
 | 系统代理（HTTP/SOCKS 监听） | mixed inbound + 写系统代理 | ✅ |
-| 增强模式（TUN 虚拟网卡，接管全部流量） | NE PacketTunnelProvider + libbox tun | 🟡 代码完成，待设备联调签名 |
+| 增强模式（TUN 虚拟网卡，接管全部流量） | NE PacketTunnelProvider + libbox tun | 🔴 代码完成；macOS 26.5 上系统扩展激活有已知系统级障碍，已挂起 |
 | 网关 / DHCP / 端口转发 | — | ❌ 非目标 |
 
 ## 2. 规则引擎
@@ -85,7 +85,8 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
 
 - **已交付**：系统代理 MVP、原生 Dashboard、规则引擎 + DNS + 策略组 + 传输层补全 +
   规则导入、生产硬化（启动前配置预校验、多订阅管理 + 自动更新、连接搜索/过滤/关闭/详情、开机自启）。
-- **M2（进行中）**：TUN 全局模式 —— NetworkExtension System Extension + libbox 嵌入 sing-box，
-  Developer ID 签名（保持 SIP 开启），首次启用需系统设置批准一次。
+- **M2（挂起）**：TUN 全局模式代码完成、签名/公证/分发流水线打通；macOS 26.5 上 OSSystemExtensionRequest
+  报 “Extension not found in App bundle”（bundle 已验证与可用扩展逐位对等、OS 认可为系统扩展），
+  疑似 26.5 + Xcode 26.5 SDK 的系统级问题，非代码缺陷。见 docs/M2-DEVICE-TEST.md。
 - **M4（已交付）**：WireGuard/SSH 出站、多 Profile、按 App 流量统计、Sparkle 自动更新（待发布基建）。
 - **剩余**：SUBNET 按网络环境切换、hosts 本地映射、fake-ip（随 TUN）、CLI/HTTP API/URL Scheme。
