@@ -134,7 +134,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gumpw.linko.tunnel
-        PRODUCT_NAME: LinkoTunnel
+        # The .systemextension bundle's on-disk name must be the bundle
+        # identifier: every working reference names it that way (Tailscale's
+        # io.tailscale.ipn.macsys.network-extension.systemextension, Surge's
+        # com.nssurge.surge-mac.ne.systemextension, Apple's samples), and on
+        # macOS 26 the SystemExtensions framework fails discovery with Code 4
+        # "Extension not found in App bundle" when it is named by product
+        # name instead. PRODUCT_NAME drives that on-disk name (and the
+        # executable name, which the references also set to the identifier).
+        PRODUCT_NAME: com.gumpw.linko.tunnel
         PRODUCT_MODULE_NAME: LinkoTunnel
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "6.0"
