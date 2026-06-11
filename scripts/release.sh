@@ -71,9 +71,12 @@ resolve_sparkle_tool() {
     printf '%s' "${SPARKLE_BIN}/${name}"
     return
   fi
+  # `|| true` keeps set -e/pipefail from killing the script SILENTLY when
+  # find trips over an unreadable DerivedData entry (or head's early exit) —
+  # any failure must fall through to the loud die below instead.
   local tool
   tool="$(find "${HOME}/Library/Developer/Xcode/DerivedData" \
-    -path "*artifacts*sparkle*bin/${name}" 2>/dev/null | head -1)"
+    -path "*artifacts*sparkle*bin/${name}" 2>/dev/null | head -1 || true)"
   [ -n "${tool}" ] || die "${name} not found. Build once (so SPM resolves Sparkle) or set SPARKLE_BIN."
   printf '%s' "${tool}"
 }
@@ -168,10 +171,11 @@ cmd_appcast() {
   rm -rf "${feed_dir}"
   mkdir -p "${feed_dir}"
   /bin/cp "${dmg_path}" "${feed_dir}/"
+  # Progress goes to stderr so a failure here is visible in CI logs.
   "${generate_appcast}" \
     --download-url-prefix "https://github.com/${repo}/releases/download/v${version}/" \
     --maximum-versions 5 \
-    "${feed_dir}" >/dev/null
+    "${feed_dir}" >&2
 
   # generate_appcast builds the feed but, on current macOS / this Sparkle
   # build, does not embed sparkle:edSignature (verified: it signs nothing for

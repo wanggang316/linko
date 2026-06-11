@@ -119,6 +119,17 @@ jobs:
             echo "  $(security cms -D -i "$f" 2>/dev/null | plutil -extract Name raw - 2>/dev/null)"
           done
 
+      # Deterministic Sparkle CLI tools: the official release tarball, instead
+      # of fishing generate_appcast/sign_update out of the SPM artifact layout
+      # in DerivedData (fragile across runner images).
+      - name: Fetch Sparkle CLI tools
+        run: |
+          VER=2.7.1
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/${VER}/Sparkle-${VER}.tar.xz" -o "$RUNNER_TEMP/sparkle.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" bin
+          echo "SPARKLE_BIN=$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_ENV"
+
       - name: Build, sign, notarize, package
         env:
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
