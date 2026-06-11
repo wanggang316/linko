@@ -19,6 +19,11 @@ on:
 permissions:
   contents: write
 
+# Run JS-based actions on Node 24 (Node 20 is removed from runners 2026-09-16;
+# forced to 24 from 2026-06-16). Opt in now so the version flip is a no-op.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   release:
     runs-on: macos-26

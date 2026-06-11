@@ -16,6 +16,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   update-cask:
     # Skip prereleases (e.g. a future tip channel); only stable vX.Y.Z.
