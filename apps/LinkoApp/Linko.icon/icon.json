@@ -1,0 +1,21 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:0.00000,0.00000,0.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "linko-mac.png",
+          "name" : "linko-mac"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
