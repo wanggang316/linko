@@ -76,7 +76,7 @@ MITM HTTPS 解密、请求捕获、URL/Header/Body 重写、Map Local、JavaScri
 | 开机自启 | ✅（SMAppService） |
 | 多 Profile 切换 / 托管配置 | ✅（无损迁移 + 切换重启） |
 | 自动更新（App 自身） | 🟡 Sparkle 已集成，待发布服务器 + appcast |
-| CLI / HTTP API / URL Scheme | ⏳ M5 评估 |
+| CLI / HTTP API / URL Scheme | 🟡 URL Scheme（`linko://`）+ `scripts/linko` CLI ✅；HTTP 控制服务未单独提供（读取走 Clash API，控制走 scheme/CLI） |
 | Ponte 设备组网 | ❌ 非目标 |
 
 ---

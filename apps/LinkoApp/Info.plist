@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Supplementary Info.plist for LinkoApp. GENERATE_INFOPLIST_FILE stays YES, so
+  Xcode uses this file as the base and merges the generated / INFOPLIST_KEY_*
+  values on top. It exists only to declare keys the generator can't express —
+  here, the `linko://` URL scheme (CFBundleURLTypes is a structured array).
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.gumpw.linko</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>linko</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

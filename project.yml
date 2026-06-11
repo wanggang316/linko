@@ -61,6 +61,9 @@ targets:
         PRODUCT_NAME: Linko
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
+        # Supplementary plist merged on top of the generated one — declares the
+        # `linko://` URL scheme (CFBundleURLTypes), which has no INFOPLIST_KEY_*.
+        INFOPLIST_FILE: apps/LinkoApp/Info.plist
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         # Required for the app to request its packet-tunnel system extension.

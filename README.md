@@ -37,13 +37,32 @@ linko looks for the sing-box binary in this order: settings override →
 `vendor/sing-box/sing-box` → `/opt/homebrew/bin/sing-box` →
 `/usr/local/bin/sing-box`.
 
+## Automation (URL scheme + CLI)
+
+linko registers a `linko://` URL scheme and ships a thin `scripts/linko` shell
+wrapper around it (the app must be running):
+
+```sh
+scripts/linko on | off | toggle      # turn the proxy on / off / flip it
+scripts/linko mode tun | system      # switch the interception mode
+scripts/linko select "<node name>"   # select a proxy node by display name
+scripts/linko profile "<name>"       # switch the active profile by name
+scripts/linko install <url> ["name"] # import a subscription (asks to confirm)
+scripts/linko test                   # run a delay test across nodes
+scripts/linko status                 # core reachability + current node
+```
+
+Equivalently, open the URLs directly, e.g. `open "linko://toggle"`. Importing a
+config (`install-config`) always prompts for confirmation in-app, since a URL
+can be opened by a webpage — the on/off/select/mode actions apply immediately.
+
 ## Repository layout
 
 ```
 apps/LinkoApp/        SwiftUI menu bar app
 packages/LinkoKit/    Swift package: models, subscription parsing, config
                       generation, core lifecycle, system proxy, Clash API
-scripts/              fetch-singbox.sh (downloads the core binary)
+scripts/              fetch-singbox.sh (core binary), linko (URL-scheme CLI)
 docs/                 PRODUCT.md / ARCHITECTURE.md / ROADMAP.md
 ```
 

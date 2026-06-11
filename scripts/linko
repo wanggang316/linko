@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# linko — drive the Linko menu-bar app from the shell.
+#
+# Control actions are sent through Linko's `linko://` URL scheme (the same
+# vocabulary the in-app handler parses), so the app must be running. Status is
+# read directly from the local Clash API the core serves.
+#
+# Usage:
+#   linko on | off | toggle          turn the proxy on / off / flip it
+#   linko mode tun | system          switch the interception mode
+#   linko select "<node name>"       select a proxy node by its display name
+#   linko profile "<name>"           switch the active profile by name
+#   linko install <url> ["<name>"]   import a subscription (asks for confirmation)
+#   linko test                       run a delay test across nodes
+#   linko status                     show core reachability + current node
+#
+# Control commands open a URL; the app applies them. Privileged actions
+# (install) prompt for confirmation inside the app — that is intentional.
+set -euo pipefail
+
+SUPPORT_DIR="$HOME/Library/Application Support/linko"
+PREFS="$SUPPORT_DIR/preferences.json"
+DEFAULT_CLASH_PORT=9090
+
+die() { printf 'linko: %s\n' "$1" >&2; exit 1; }
+
+usage() {
+  sed -n '4,18p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+# URL-encode the argument per RFC 3986 (pure bash, no python/jq dep). Iterates
+# BYTES — `LC_ALL=C` makes ${s:i:1} byte-wise — so multibyte UTF-8 (e.g. CJK
+# node names) is percent-encoded one byte at a time, as the spec requires.
+urlencode() {
+  local LC_ALL=C
+  local s="$1" i c out=""
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+open_url() { open "$1"; }
+
+# Resolve the Clash API port from preferences.json (falls back to the default).
+clash_port() {
+  if [ -f "$PREFS" ]; then
+    plutil -extract clashAPIPort raw -o - "$PREFS" 2>/dev/null || echo "$DEFAULT_CLASH_PORT"
+  else
+    echo "$DEFAULT_CLASH_PORT"
+  fi
+}
+
+cmd_status() {
+  local port base body now tmp
+  port="$(clash_port)"
+  base="http://127.0.0.1:$port"
+  if ! body="$(curl -fsS --max-time 2 "$base/version" 2>/dev/null)"; then
+    echo "代理核心：未运行（Clash API 127.0.0.1:$port 不可达）"
+    return 0
+  fi
+  tmp="$(mktemp)"; trap 'rm -f "$tmp"' RETURN
+  printf '%s' "$body" > "$tmp"
+  echo "代理核心：运行中 (sing-box $(plutil -extract version raw -o - "$tmp" 2>/dev/null || echo '?'))"
+  if body="$(curl -fsS --max-time 2 "$base/proxies/proxy" 2>/dev/null)"; then
+    printf '%s' "$body" > "$tmp"
+    now="$(plutil -extract now raw -o - "$tmp" 2>/dev/null || true)"
+    [ -n "$now" ] && echo "当前节点：$now"
+  fi
+}
+
+main() {
+  [ $# -ge 1 ] || usage 1
+  local action="$1"; shift
+  case "$action" in
+    on|enable)   open_url "linko://on" ;;
+    off|disable) open_url "linko://off" ;;
+    toggle)      open_url "linko://toggle" ;;
+    test)        open_url "linko://test" ;;
+    mode)
+      [ $# -ge 1 ] || die "mode 需要一个参数：tun 或 system"
+      case "$1" in
+        tun|system) open_url "linko://mode?value=$1" ;;
+        *) die "未知模式「$1」（可选：tun, system）" ;;
+      esac ;;
+    select)
+      [ $# -ge 1 ] || die "select 需要节点名称"
+      open_url "linko://select?node=$(urlencode "$1")" ;;
+    profile)
+      [ $# -ge 1 ] || die "profile 需要档案名称"
+      open_url "linko://profile?name=$(urlencode "$1")" ;;
+    install)
+      [ $# -ge 1 ] || die "install 需要订阅 URL"
+      local url; url="linko://install-config?url=$(urlencode "$1")"
+      [ $# -ge 2 ] && url+="&name=$(urlencode "$2")"
+      open_url "$url" ;;
+    status) cmd_status ;;
+    -h|--help|help) usage 0 ;;
+    *) die "未知命令「$action」（运行 linko --help 查看用法）" ;;
+  esac
+}
+
+main "$@"

@@ -632,6 +632,83 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - URL scheme / CLI commands
+
+    /// Dispatches a `linko://` command (from the app's URL handler or the
+    /// `scripts/linko` CLI) onto the existing control surface. Privileged
+    /// commands are confirmed with the user first: a webpage can open a custom
+    /// URL, so importing a remote config without consent would be unsafe.
+    func handle(command: LinkoCommand) async {
+        switch command {
+        case .enableProxy:
+            await setSystemProxy(enabled: true)
+        case .disableProxy:
+            await setSystemProxy(enabled: false)
+        case .toggleProxy:
+            await setSystemProxy(enabled: !isProxyActive)
+        case let .setMode(mode):
+            await setProxyMode(mode)
+        case let .selectNode(name):
+            selectNodeByName(name)
+        case let .switchProfile(name):
+            await switchProfileByName(name)
+        case .testDelays:
+            testDelays()
+        case let .installConfig(url, name):
+            await confirmAndInstall(url: url, name: name)
+        }
+    }
+
+    /// Selects the first node whose display name matches `name`
+    /// (case-insensitively). Surfaces a notice when nothing matches.
+    private func selectNodeByName(_ name: String) {
+        let target = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard let node = allNodes.first(where: {
+            $0.name.trimmingCharacters(in: .whitespaces).lowercased() == target
+        }) else {
+            lastErrorMessage = "未找到名为「\(name)」的节点。"
+            return
+        }
+        selectNode(id: node.id)
+    }
+
+    /// Switches to the first profile whose name matches `name`.
+    private func switchProfileByName(_ name: String) async {
+        let target = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard let summary = profileSummaries.first(where: {
+            $0.name.trimmingCharacters(in: .whitespaces).lowercased() == target
+        }) else {
+            lastErrorMessage = "未找到名为「\(name)」的配置档案。"
+            return
+        }
+        await switchProfile(id: summary.id)
+    }
+
+    /// Confirms with the user, then imports a subscription from `url`. The
+    /// confirmation is the trust boundary: the URL can originate from a webpage
+    /// that opened `linko://install-config`, so we never fetch + trust it
+    /// silently. An optional `name` renames the subscription after import.
+    private func confirmAndInstall(url: URL, name: String?) async {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "导入订阅？"
+        alert.informativeText = "Linko 收到一个导入订阅的请求：\n\(url.absoluteString)\n\n仅在你信任该来源时导入。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "导入")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            _ = try await importSubscription(urlString: url.absoluteString)
+            if let name, !name.isEmpty,
+               let sub = subscriptions.first(where: { $0.url == url }) {
+                renameSubscription(id: sub.id, to: name)
+            }
+            lastErrorMessage = "已从 URL 导入订阅。"
+        } catch {
+            lastErrorMessage = (error as? AppError)?.message ?? "导入订阅失败：\(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Delay testing
 
     func testDelays() {
