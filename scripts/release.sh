@@ -63,17 +63,18 @@ override the tools dir with SPARKLE_BIN if generate_appcast isn't found.
 EOF
 }
 
-# Locate Sparkle's generate_appcast: prefer $SPARKLE_BIN, else the SPM
-# artifact resolved into DerivedData.
-resolve_generate_appcast() {
-  if [ -n "${SPARKLE_BIN:-}" ] && [ -x "${SPARKLE_BIN}/generate_appcast" ]; then
-    printf '%s' "${SPARKLE_BIN}/generate_appcast"
+# Locate a Sparkle CLI tool by name (generate_appcast / sign_update): prefer
+# $SPARKLE_BIN, else the SPM artifact resolved into DerivedData.
+resolve_sparkle_tool() {
+  local name="$1"
+  if [ -n "${SPARKLE_BIN:-}" ] && [ -x "${SPARKLE_BIN}/${name}" ]; then
+    printf '%s' "${SPARKLE_BIN}/${name}"
     return
   fi
   local tool
   tool="$(find "${HOME}/Library/Developer/Xcode/DerivedData" \
-    -path "*artifacts*sparkle*bin/generate_appcast" 2>/dev/null | head -1)"
-  [ -n "${tool}" ] || die "generate_appcast not found. Build once (so SPM resolves Sparkle) or set SPARKLE_BIN."
+    -path "*artifacts*sparkle*bin/${name}" 2>/dev/null | head -1)"
+  [ -n "${tool}" ] || die "${name} not found. Build once (so SPM resolves Sparkle) or set SPARKLE_BIN."
   printf '%s' "${tool}"
 }
 
@@ -156,23 +157,50 @@ cmd_appcast() {
   local version="${1:-$(read_marketing_version)}"
   local dmg_path="${release_dir}/Linko-${version}.dmg"
   [ -f "${dmg_path}" ] || die "missing ${dmg_path}. Run release.sh dmg first."
-  local tool
-  tool="$(resolve_generate_appcast)"
+  local generate_appcast sign_update
+  generate_appcast="$(resolve_sparkle_tool generate_appcast)"
+  sign_update="$(resolve_sparkle_tool sign_update)"
 
-  # Stage just this DMG so generate_appcast emits a single signed item whose
-  # enclosure points at the GitHub release asset (the canonical feed served
-  # from releases/latest/download/appcast.xml re-attaches this file). The
-  # EdDSA signature is produced from the private key in the login Keychain.
+  # Stage just this DMG so generate_appcast emits a single item whose enclosure
+  # points at the GitHub release asset (the canonical feed served from
+  # releases/latest/download/appcast.xml re-attaches this file).
   local feed_dir="${release_dir}/feed"
   rm -rf "${feed_dir}"
   mkdir -p "${feed_dir}"
   /bin/cp "${dmg_path}" "${feed_dir}/"
-  "${tool}" \
+  "${generate_appcast}" \
     --download-url-prefix "https://github.com/${repo}/releases/download/v${version}/" \
     --maximum-versions 5 \
-    "${feed_dir}"
+    "${feed_dir}" >/dev/null
+
+  # generate_appcast builds the feed but, on current macOS / this Sparkle
+  # build, does not embed sparkle:edSignature (verified: it signs nothing for
+  # either keychain or --ed-key-file, DMG or zip). sign_update DOES sign
+  # reliably, so we sign the DMG separately and inject the signature into the
+  # enclosure. The signature must be over the FINAL (notarized + stapled) DMG,
+  # which is why `release` runs appcast last.
+  local sig_line edsig
+  if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
+    sig_line="$(printf '%s' "${SPARKLE_PRIVATE_KEY}" | "${sign_update}" "${dmg_path}" --ed-key-file -)"
+  else
+    sig_line="$("${sign_update}" "${dmg_path}")"  # private key from the login Keychain
+  fi
+  edsig="$(printf '%s' "${sig_line}" | sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p')"
+  [ -n "${edsig}" ] || die "sign_update did not return an EdDSA signature"
+
+  /usr/bin/python3 - "${feed_dir}/appcast.xml" "${edsig}" <<'PY'
+import sys, re
+path, sig = sys.argv[1], sys.argv[2]
+xml = open(path, encoding="utf-8").read()
+if "sparkle:edSignature" not in xml:
+    xml = re.sub(r'(<enclosure\b)', r'\1 sparkle:edSignature="%s"' % sig, xml, count=1)
+    open(path, "w", encoding="utf-8").write(xml)
+PY
+
+  grep -q 'sparkle:edSignature=' "${feed_dir}/appcast.xml" \
+    || die "failed to inject EdDSA signature into appcast"
   /bin/cp "${feed_dir}/appcast.xml" "${release_dir}/appcast.xml"
-  log "appcast: ${release_dir}/appcast.xml"
+  log "appcast: ${release_dir}/appcast.xml (signed)"
   printf '%s\n' "${release_dir}/appcast.xml"
 }
 
