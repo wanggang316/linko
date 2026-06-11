@@ -26,8 +26,13 @@ targets:
         product: Sparkle
       # Embed the system extension into the app bundle so the app can install
       # and start it. The extension is the only target that links Libbox.
+      # codeSign:true adds CodeSignOnCopy so the extension is re-signed during
+      # the app's signing and sealed as NESTED CODE (with a cdhash) — without
+      # it the extension is sealed as flat resource files and the
+      # SystemExtensions framework can't enumerate it ("Extension not found").
       - target: LinkoTunnel
         embed: true
+        codeSign: true
     postBuildScripts:
       - name: Embed vendored sing-box
         shell: /bin/sh
@@ -58,6 +63,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Required for the app to request its packet-tunnel system extension.
+        INFOPLIST_KEY_NSSystemExtensionUsageDescription: "Linko 使用系统扩展以 TUN 全局模式接管网络流量。"
         # --- Sparkle auto-update keys (placeholders; see docs/RELEASE.md) ---
         # Appcast feed: replace with the real hosted URL before shipping.
         INFOPLIST_KEY_SUFeedURL: https://example.com/appcast.xml
