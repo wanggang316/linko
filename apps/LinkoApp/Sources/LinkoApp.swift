@@ -21,7 +21,7 @@ struct LinkoApp: App {
             MenuContentView()
                 .environmentObject(appState)
         } label: {
-            Image(systemName: menuBarSymbolName)
+            menuBarLabel
         }
         .menuBarExtraStyle(.window)
 
@@ -47,14 +47,20 @@ struct LinkoApp: App {
         }
     }
 
-    private var menuBarSymbolName: String {
+    /// The menu-bar glyph. The brand smiley (a template image, so the system
+    /// tints it for light/dark/highlight) marks the normal states — full when
+    /// the core is running, dimmed when stopped — while a failure falls back to
+    /// the universal warning triangle so an error stays unmistakable.
+    @ViewBuilder
+    private var menuBarLabel: some View {
         switch appState.coreState {
         case .running:
-            return "bolt.horizontal.circle.fill"
+            Image("MenuBarIcon")
         case .stopped:
-            return "bolt.horizontal.circle"
+            Image("MenuBarIcon")
+                .opacity(0.5)
         case .failed:
-            return "exclamationmark.triangle"
+            Image(systemName: "exclamationmark.triangle")
         }
     }
 }
