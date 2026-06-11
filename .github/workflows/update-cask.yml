@@ -1,0 +1,84 @@
+name: update-cask
+
+# When a stable (non-prerelease) Release is published, render the Homebrew
+# cask with that version + DMG sha256 and push it to wanggang316/homebrew-tap
+# so `brew install --cask wanggang316/tap/linko` tracks the latest DMG.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing vX.Y.Z release tag to publish a cask for'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update-cask:
+    # Skip prereleases (e.g. a future tip channel); only stable vX.Y.Z.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag + version
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag '$TAG' is not a stable vX.Y.Z — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download DMG + checksum
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ steps.meta.outputs.tag }}" \
+            -R "${{ github.repository }}" \
+            --pattern '*.dmg' --pattern '*.dmg.sha256' --clobber
+
+      - name: Verify checksum + render cask
+        if: steps.meta.outputs.skip != 'true'
+        id: render
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          DMG="Linko-$V.dmg"
+          # Cross-check the published sidecar against the downloaded DMG.
+          EXPECTED=$(awk '{print $1}' "$DMG.sha256")
+          ACTUAL=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::sha256 mismatch for $DMG (sidecar $EXPECTED vs actual $ACTUAL)"; exit 1
+          fi
+          ./scripts/render-cask.sh "$V" "$ACTUAL" "$RUNNER_TEMP/linko.rb"
+          echo "cask=$RUNNER_TEMP/linko.rb" >> "$GITHUB_OUTPUT"
+
+      - name: Push cask to homebrew-tap
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/wanggang316/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          cp "${{ steps.render.outputs.cask }}" tap/Casks/linko.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/linko.rb
+          if git diff --cached --quiet; then
+            echo "cask already up to date"
+          else
+            git commit -m "linko $V"
+            git push
+          fi
