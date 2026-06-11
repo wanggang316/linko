@@ -6,15 +6,12 @@
     <array>
         <string>packet-tunnel-provider-systemextension</string>
     </array>
+    <!-- Non-sandboxed Developer ID system extension (matches Surge's working
+         packet-tunnel extension). The App Groups entitlement therefore uses the
+         team-identifier-prefixed form required for non-sandboxed macOS apps. -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.gumpw.linko</string>
+        <string>HC438T2B8P.group.com.gumpw.linko</string>
     </array>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <true/>
 </dict>
 </plist>

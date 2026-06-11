@@ -25,7 +25,7 @@
     <key>NetworkExtension</key>
     <dict>
         <key>NEMachServiceName</key>
-        <string>HC438T2B8P.com.gumpw.linko.tunnel</string>
+        <string>HC438T2B8P.group.com.gumpw.linko</string>
         <key>NEProviderClasses</key>
         <dict>
             <key>com.apple.networkextension.packet-tunnel</key>

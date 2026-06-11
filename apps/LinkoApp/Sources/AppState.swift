@@ -176,6 +176,7 @@ final class AppState: ObservableObject {
         // Start the background subscription auto-update loop if the user had
         // it enabled in a previous session.
         rescheduleAutoUpdate()
+
     }
 
     static func defaultSupportDirectoryURL() -> URL {

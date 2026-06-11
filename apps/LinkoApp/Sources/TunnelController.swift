@@ -22,7 +22,7 @@ import NetworkExtension
 final class TunnelController: ObservableObject {
     /// Shared App Group identifier — identical to the value in both targets'
     /// entitlements. The extension reads its config from this container.
-    static let appGroupIdentifier = "group.com.gumpw.linko"
+    static let appGroupIdentifier = "HC438T2B8P.group.com.gumpw.linko"
     /// Bundle id of the packet-tunnel system extension. Must match the
     /// extension target's `PRODUCT_BUNDLE_IDENTIFIER` and the
     /// `NEProviderClasses` wiring in its Info.plist.
