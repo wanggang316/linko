@@ -9,9 +9,10 @@ import NetworkExtension
 /// `LinkoTunnel` packet-tunnel system extension (bundle id
 /// `com.gumpw.linko.tunnel`). Responsibilities:
 /// - install/update the provider configuration in the user's VPN preferences;
-/// - write the generated `.tun` sing-box config JSON into the shared App Group
-///   container so the extension can read it (it also receives the JSON inline
-///   via the start options / a provider message — belt-and-suspenders);
+/// - hand the generated `.tun` sing-box config JSON to the extension purely
+///   over IPC (inline start options on start, a provider message on reload) —
+///   a root-run system extension can't share the app's per-user App Group
+///   container, so there is no shared config file;
 /// - start/stop the tunnel and reload its config while running;
 /// - observe `NEVPNStatus` and surface it as a `@Published` value.
 ///
@@ -20,14 +21,12 @@ import NetworkExtension
 /// spawns a subprocess and never mutates the macOS system proxy.
 @MainActor
 final class TunnelController: ObservableObject {
-    /// Shared App Group identifier — identical to the value in both targets'
-    /// entitlements. The extension reads its config from this container.
-    static let appGroupIdentifier = "HC438T2B8P.group.com.gumpw.linko"
     /// Bundle id of the packet-tunnel system extension. Must match the
     /// extension target's `PRODUCT_BUNDLE_IDENTIFIER` and the
     /// `NEProviderClasses` wiring in its Info.plist.
     static let providerBundleIdentifier = "com.gumpw.linko.tunnel"
-    /// Name of the config file the extension reads from the App Group container.
+    /// Marker key stored in the provider configuration. Cosmetic now that the
+    /// config travels over IPC (the extension no longer reads a shared file).
     static let configFileName = "config.json"
 
     /// Live tunnel status, mirrored from the underlying `NEVPNConnection`.
@@ -63,25 +62,6 @@ final class TunnelController: ObservableObject {
         @unknown default:
             return false
         }
-    }
-
-    // MARK: - App Group container
-
-    /// URL of the shared App Group container. Throws a localized error if the
-    /// container is unavailable (entitlement/provisioning not in place yet).
-    static func containerURL() throws -> URL {
-        guard let url = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
-        ) else {
-            throw AppError(message: "无法访问共享容器（App Group 未配置）。")
-        }
-        return url
-    }
-
-    /// Path of the config file inside the App Group container that the
-    /// extension reads.
-    static func sharedConfigURL() throws -> URL {
-        try containerURL().appendingPathComponent(configFileName)
     }
 
     // MARK: - Loading / installing
@@ -158,7 +138,6 @@ final class TunnelController: ObservableObject {
         // this throws SystemExtensionError.needsApproval and shows the approval
         // prompt; the user allows it in System Settings and toggles TUN again.
         try await extensionInstaller.activate()
-        try writeSharedConfig(configJSON)
         let mgr = try await install()
         guard let session = mgr.connection as? NETunnelProviderSession else {
             throw AppError(message: "TUN 扩展未就绪，无法启动。")
@@ -185,11 +164,10 @@ final class TunnelController: ObservableObject {
     }
 
     /// Pushes a new `.tun` config to a *running* tunnel without restarting it.
-    /// Writes the file, then sends the JSON as a provider message; the
-    /// extension's `handleAppMessage` reloads the sing-box service in place.
-    /// Throws if the tunnel is not running or the message round-trip fails.
+    /// Sends the JSON as a provider message; the extension's `handleAppMessage`
+    /// reloads the sing-box service in place. Throws if the tunnel is not
+    /// running or the message round-trip fails.
     func reload(configJSON: String) async throws {
-        try writeSharedConfig(configJSON)
         guard
             let mgr = manager,
             let session = mgr.connection as? NETunnelProviderSession,
@@ -213,19 +191,6 @@ final class TunnelController: ObservableObject {
             } catch {
                 continuation.resume(throwing: AppError(message: "发送配置到 TUN 扩展失败：\(error.localizedDescription)"))
             }
-        }
-    }
-
-    // MARK: - Config file
-
-    /// Writes the `.tun` config JSON into the App Group container for the
-    /// extension to read. Throws a localized error if the container is missing.
-    private func writeSharedConfig(_ configJSON: String) throws {
-        let url = try Self.sharedConfigURL()
-        do {
-            try Data(configJSON.utf8).write(to: url, options: .atomic)
-        } catch {
-            throw AppError(message: "写入共享配置失败：\(error.localizedDescription)")
         }
     }
 

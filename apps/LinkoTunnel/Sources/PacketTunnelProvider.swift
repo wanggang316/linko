@@ -12,12 +12,6 @@ import Libbox
 ///   `commandServer.startOrReloadService(config)` → libbox calls back into the
 ///   platform interface's `openTun`, which configures the utun and returns its fd.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
-    /// Shared App Group identifier; the main app writes the config here and the
-    /// provider reads libbox's working/temp/base paths out of the same container.
-    /// Must be the TeamID-prefixed form from BOTH targets' entitlements — an
-    /// unentitled identifier silently resolves to a private per-user container,
-    /// so the provider would never see the config the app wrote.
-    private static let appGroupIdentifier = "HC438T2B8P.group.com.gumpw.linko"
     private static let configFileName = "config.json"
 
     private var commandServer: LibboxCommandServer?
@@ -45,29 +39,32 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func startTunnelSynchronously(options startOptions: [String: NSObject]?) throws {
-        guard let groupURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier)
-        else {
-            throw providerError("App Group container unavailable: \(Self.appGroupIdentifier)")
-        }
-
-        let basePath = groupURL.path
-        let workingURL = groupURL.appendingPathComponent("Working", isDirectory: true)
-        let tempURL = groupURL.appendingPathComponent("Temp", isDirectory: true)
+        // A system extension runs as root and CANNOT use the per-user App Group
+        // container (`containerURL` returns nil for it, and even when it doesn't
+        // root's container is a different directory than the app's). So libbox's
+        // working dirs live in the extension's own root-writable Application
+        // Support directory, and the config is exchanged over IPC (start options
+        // / provider messages) rather than a shared file — persisted privately
+        // so a system-initiated relaunch (on-demand / at boot) can recover it.
+        let baseURL = try Self.workingBaseDirectory()
+        let basePath = baseURL.path
+        let workingURL = baseURL.appendingPathComponent("Working", isDirectory: true)
+        let tempURL = baseURL.appendingPathComponent("Temp", isDirectory: true)
         try FileManager.default.createDirectory(at: workingURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: tempURL, withIntermediateDirectories: true)
 
-        // Config source: the start option wins (belt), otherwise the App Group
-        // file the main app wrote (suspenders).
+        // Config source: the inline start option wins; otherwise the copy we
+        // persisted on a previous start (covers a relaunch with no options).
         let configContent: String
         if let optionConfig = startOptions?["configContent"] as? String, !optionConfig.isEmpty {
             configContent = optionConfig
+            try? persistConfig(optionConfig)
+        } else if let saved = try? String(
+            contentsOf: baseURL.appendingPathComponent(Self.configFileName), encoding: .utf8
+        ), !saved.isEmpty {
+            configContent = saved
         } else {
-            let configURL = groupURL.appendingPathComponent(Self.configFileName)
-            guard let fileConfig = try? String(contentsOf: configURL, encoding: .utf8), !fileConfig.isEmpty else {
-                throw providerError("No sing-box config provided (neither option nor App Group file)")
-            }
-            configContent = fileConfig
+            throw providerError("No sing-box config provided (no start option and no saved config)")
         }
         self.currentConfig = configContent
 
@@ -170,13 +167,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // MARK: - Helpers
 
+    /// The extension's private, root-writable working directory. The App Group
+    /// container is unavailable to a root-run system extension, so libbox's
+    /// base/working/temp dirs and the persisted config live here instead.
+    private static func workingBaseDirectory() throws -> URL {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: true
+        )
+        let dir = support.appendingPathComponent("LinkoTunnel", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     private func persistConfig(_ config: String) throws {
-        guard let groupURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier)
-        else {
-            throw providerError("App Group container unavailable for config persistence")
-        }
-        let configURL = groupURL.appendingPathComponent(Self.configFileName)
+        let configURL = try Self.workingBaseDirectory().appendingPathComponent(Self.configFileName)
         try config.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
