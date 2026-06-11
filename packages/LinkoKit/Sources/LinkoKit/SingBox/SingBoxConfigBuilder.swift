@@ -169,10 +169,61 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
             config["route"] = routeWithResolver
         }
 
+        if preferences.proxyMode == .tun {
+            applyTunDNSGuarantees(to: &config)
+        }
+
         return try JSONSerialization.data(
             withJSONObject: config,
             options: [.prettyPrinted, .sortedKeys]
         )
+    }
+
+    // MARK: - TUN DNS guarantees
+
+    /// Tag of the DNS server synthesized when the user has DNS management off.
+    static let tunFallbackDNSTag = "tun-fallback-dns"
+
+    /// TUN mode cannot function without DNS: `auto_route` + `strict_route`
+    /// pull every packet — including the system resolver's own queries — into
+    /// the tunnel, so sing-box must (a) be able to resolve outbound server
+    /// domains itself and (b) answer the clients' DNS queries. System-proxy
+    /// mode needs neither (the OS resolver never enters sing-box there).
+    ///
+    /// Guarantees applied to a `.tun` config:
+    /// - a `dns` block with at least one server (synthesized when the user's
+    ///   DNS management is disabled), plus `route.default_domain_resolver`;
+    /// - `route.rules` is prefixed with `action: sniff` and
+    ///   `protocol: dns → action: hijack-dns` (sing-box 1.11+ rule actions) so
+    ///   tunneled DNS queries are answered by the DNS module instead of being
+    ///   forwarded — and possibly blackholed — through the final outbound.
+    private func applyTunDNSGuarantees(to config: inout [String: Any]) {
+        var route = (config["route"] as? [String: Any]) ?? [:]
+
+        if config["dns"] == nil {
+            config["dns"] = [
+                "servers": [
+                    [
+                        "tag": Self.tunFallbackDNSTag,
+                        "type": "udp",
+                        "server": "223.5.5.5",
+                        // Resolver traffic must never route back into the
+                        // proxy (whose server domain it is busy resolving).
+                        "detour": "direct",
+                    ] as [String: Any]
+                ]
+            ]
+            route["default_domain_resolver"] = ["server": Self.tunFallbackDNSTag]
+        }
+
+        var rules = (route["rules"] as? [[String: Any]]) ?? []
+        let hasHijack = rules.contains { ($0["action"] as? String) == "hijack-dns" }
+        if !hasHijack {
+            rules.insert(["protocol": "dns", "action": "hijack-dns"], at: 0)
+            rules.insert(["action": "sniff"], at: 0)
+            route["rules"] = rules
+        }
+        config["route"] = route
     }
 
     // MARK: - Inbound

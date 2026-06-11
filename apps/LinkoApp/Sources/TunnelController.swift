@@ -163,6 +163,14 @@ final class TunnelController: ObservableObject {
         guard let session = mgr.connection as? NETunnelProviderSession else {
             throw AppError(message: "TUN 扩展未就绪，无法启动。")
         }
+        // A stop is asynchronous: the session lingers in `.disconnecting`
+        // while the provider tears down, and `startTunnel` during that window
+        // is rejected by the system ("turn off then immediately back on"
+        // otherwise bricks the toggle until a mode switch resets everything).
+        // Wait out the teardown briefly before starting.
+        for _ in 0..<40 where session.status == .disconnecting {
+            try? await Task.sleep(nanoseconds: 250 * NSEC_PER_MSEC)
+        }
         do {
             try session.startTunnel(options: ["configContent": configJSON as NSString])
         } catch {

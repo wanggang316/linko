@@ -14,7 +14,10 @@ import Libbox
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Shared App Group identifier; the main app writes the config here and the
     /// provider reads libbox's working/temp/base paths out of the same container.
-    private static let appGroupIdentifier = "group.com.gumpw.linko"
+    /// Must be the TeamID-prefixed form from BOTH targets' entitlements — an
+    /// unentitled identifier silently resolves to a private per-user container,
+    /// so the provider would never see the config the app wrote.
+    private static let appGroupIdentifier = "HC438T2B8P.group.com.gumpw.linko"
     private static let configFileName = "config.json"
 
     private var commandServer: LibboxCommandServer?

@@ -248,4 +248,73 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         let data = try builder.build(nodes: [node], preferences: AppPreferences())
         XCTAssertNotNil(String(data: data, encoding: .utf8))
     }
+
+    // MARK: - TUN DNS guarantees
+
+    private func tunPrefs() -> AppPreferences {
+        var prefs = AppPreferences()
+        prefs.proxyMode = .tun
+        return prefs
+    }
+
+    private var sampleNode: ProxyNode {
+        ProxyNode(
+            name: "HK", protocolType: .shadowsocks, server: "hk.example.com", port: 8388,
+            password: "pw", method: "aes-256-gcm"
+        )
+    }
+
+    func testTunModeSynthesizesFallbackDNSWhenDisabled() throws {
+        let config = try buildJSON(nodes: [sampleNode], preferences: tunPrefs())
+
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any], "tun config must carry a dns block")
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        let fallback = try XCTUnwrap(servers.first { ($0["tag"] as? String) == SingBoxConfigBuilder.tunFallbackDNSTag })
+        XCTAssertEqual(fallback["type"] as? String, "udp")
+        XCTAssertEqual(fallback["detour"] as? String, "direct")
+
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        let resolver = try XCTUnwrap(route["default_domain_resolver"] as? [String: Any])
+        XCTAssertEqual(resolver["server"] as? String, SingBoxConfigBuilder.tunFallbackDNSTag)
+    }
+
+    func testTunModePrefixesSniffAndHijackRules() throws {
+        let config = try buildJSON(nodes: [sampleNode], preferences: tunPrefs())
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(rules.count, 2)
+        XCTAssertEqual(rules[0]["action"] as? String, "sniff")
+        XCTAssertEqual(rules[1]["action"] as? String, "hijack-dns")
+        XCTAssertEqual(rules[1]["protocol"] as? String, "dns")
+    }
+
+    func testTunModeKeepsUserDNSWhenEnabled() throws {
+        var prefs = tunPrefs()
+        prefs.routing.dns.isEnabled = true
+        prefs.routing.dns.servers = [
+            DNSServer(tag: "user-doh", address: "https://1.1.1.1/dns-query")
+        ]
+        let config = try buildJSON(nodes: [sampleNode], preferences: prefs)
+
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertTrue(servers.contains { ($0["tag"] as? String) == "user-doh" })
+        XCTAssertFalse(
+            servers.contains { ($0["tag"] as? String) == SingBoxConfigBuilder.tunFallbackDNSTag },
+            "user DNS present: no fallback server should be synthesized"
+        )
+        // The hijack prefix still applies regardless of who provided DNS.
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertEqual(rules[0]["action"] as? String, "sniff")
+        XCTAssertEqual(rules[1]["action"] as? String, "hijack-dns")
+    }
+
+    func testSystemProxyModeStaysDNSFree() throws {
+        let config = try buildJSON(nodes: [sampleNode], preferences: AppPreferences())
+        XCTAssertNil(config["dns"], "system-proxy mode must not grow a dns block")
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        let rules = (route["rules"] as? [[String: Any]]) ?? []
+        XCTAssertFalse(rules.contains { ($0["action"] as? String) == "hijack-dns" })
+    }
 }
