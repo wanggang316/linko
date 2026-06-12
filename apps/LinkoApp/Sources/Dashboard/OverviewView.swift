@@ -225,14 +225,7 @@ private struct ProxyControlCard: View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 SectionHeader("网络接管", symbolName: "shield.lefthalf.filled") {
-                    if appState.isSwitchingProxy {
-                        ProgressView().controlSize(.small)
-                    }
-                    Toggle("", isOn: startBinding)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .tint(Theme.Color.accent)
-                        .disabled(appState.isSwitchingProxy)
+                    StatusPill(statusTitle, kind: statusKind)
                 }
 
                 Picker("代理模式", selection: modeBinding) {
@@ -244,13 +237,19 @@ private struct ProxyControlCard: View {
                 .labelsHidden()
                 .disabled(appState.isSwitchingProxy)
 
-                HStack(spacing: Theme.Spacing.xs) {
-                    Circle()
-                        .fill(isActive ? StatusKind.active.color : StatusKind.inactive.color)
-                        .frame(width: 8, height: 8)
-                    Text(statusText)
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(Theme.Color.secondaryLabel)
+                Divider().opacity(0.4)
+
+                LabeledContent {
+                    Toggle("", isOn: startBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                        .tint(Theme.Color.accent)
+                        .disabled(appState.isSwitchingProxy)
+                } label: {
+                    Text("启动代理")
+                        .font(Theme.Font.body)
+                        .foregroundStyle(Theme.Color.label)
                 }
             }
         }
@@ -273,25 +272,13 @@ private struct ProxyControlCard: View {
         )
     }
 
-    private var symbolName: String {
-        switch mode {
-        case .systemProxy: return "network"
-        case .tun: return "point.3.filled.connected.trianglepath.dotted"
-        }
+    private var statusKind: StatusKind {
+        if appState.isSwitchingProxy { return .warning }
+        return isActive ? .active : .inactive
     }
 
-    private var modeDescription: String {
-        switch mode {
-        case .systemProxy: return "仅接管遵循系统代理设置的应用，兼容性最好。"
-        case .tun: return "虚拟网卡接管全部流量，覆盖不遵循系统代理的应用。"
-        }
-    }
-
-    private var statusText: String {
-        guard isActive else { return "未启用" }
-        switch mode {
-        case .systemProxy: return "已接管系统网络"
-        case .tun: return "已接管全部流量 · \(appState.tunnelStatus.linkoLabel)"
-        }
+    private var statusTitle: String {
+        if appState.isSwitchingProxy { return "切换中" }
+        return isActive ? "已接管" : "未启用"
     }
 }
