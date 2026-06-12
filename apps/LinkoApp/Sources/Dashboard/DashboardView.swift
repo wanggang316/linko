@@ -255,6 +255,7 @@ struct DashboardView: View {
                 tint: Theme.Color.upload
             )
         }
+        .padding(.horizontal, Theme.Spacing.sm)
         .opacity(appState.isCoreRunning ? 1 : 0.4)
     }
 
