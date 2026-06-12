@@ -21,6 +21,11 @@ struct MenuContentView: View {
     /// Fixed popover width — tight, panel-like, never a sprawling menu.
     private let panelWidth: CGFloat = 320
 
+    /// Which node group's flyout is currently open, keyed by group (subscription
+    /// id, or a sentinel for the manual group). At most one is open at a time so
+    /// the side flyouts behave like native submenus.
+    @State private var openGroupKey: String?
+
     var body: some View {
         VStack(spacing: Theme.Spacing.sm) {
             header
@@ -187,24 +192,26 @@ struct MenuContentView: View {
     private var nodeSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             SectionHeader("节点", symbolName: "point.3.connected.trianglepath.dotted") {
-                if !appState.allNodes.isEmpty {
-                    HStack(spacing: Theme.Spacing.xs) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    if !appState.allNodes.isEmpty {
                         CountBadge(count: appState.allNodes.count)
-                        Button {
-                            appState.testDelays()
-                        } label: {
-                            HStack(spacing: Theme.Spacing.xxs) {
-                                if appState.isTestingDelays {
-                                    ProgressView().controlSize(.mini)
-                                } else {
-                                    Image(systemName: "bolt.fill").font(.caption2)
-                                }
-                                Text("测延迟").font(Theme.Font.caption)
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(appState.isTestingDelays || !isCoreRunning)
                     }
+                    // Per-group "延迟测试" lives inside each flyout now, so the
+                    // header only carries an icon shortcut into the full node
+                    // manager (the Dashboard's 节点 page).
+                    Button {
+                        appState.openWindow(id: WindowID.dashboard, using: { openWindow(id: $0) })
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                            .padding(.horizontal, Theme.Spacing.xxs)
+                            .padding(.vertical, 1)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(cornerRadius: Theme.Radius.small)
+                    .help("管理节点")
                 }
             }
 
@@ -234,57 +241,50 @@ struct MenuContentView: View {
         .padding(.vertical, Theme.Spacing.md)
     }
 
-    /// One flyout `Menu` per node group — each subscription, then the manual
-    /// nodes — plus a row into the full node manager. This replaces the old
-    /// inline scroll list, which collapsed to zero height inside the
+    /// One row per node group — each subscription, then the manual nodes — whose
+    /// node list flies out to the right (see `NodeGroupRow`). This replaces the
+    /// old inline scroll list, which collapsed to zero height inside the
     /// self-sizing `MenuBarExtra(.window)` panel: a `ScrollView` reports a
     /// ~zero ideal height, and a `maxHeight` only caps it — it never forces the
     /// list open, so the rows were present but invisible. Moving the node list
-    /// into a popup also keeps the panel itself compact.
+    /// into a side flyout also keeps the panel itself compact.
     private var nodeGroups: some View {
         VStack(spacing: Theme.Spacing.xxs) {
             ForEach(subscriptionGroups, id: \.id) { sub in
-                NodeGroupMenu(
+                NodeGroupRow(
                     title: sub.name,
-                    symbolName: "rectangle.stack",
                     nodes: sub.nodes,
-                    canTestDelays: isCoreRunning
+                    canTestDelays: isCoreRunning,
+                    isOpen: flyoutBinding(for: sub.id.uuidString)
                 )
             }
             if !appState.manualNodes.isEmpty {
-                NodeGroupMenu(
+                NodeGroupRow(
                     title: "手动节点",
-                    symbolName: "hand.point.up.left",
                     nodes: appState.manualNodes,
-                    canTestDelays: isCoreRunning
+                    canTestDelays: isCoreRunning,
+                    isOpen: flyoutBinding(for: Self.manualGroupKey)
                 )
             }
-            manageNodesRow
         }
+    }
+
+    /// Sentinel key for the manual-nodes group (real groups key off the
+    /// subscription's UUID string).
+    private static let manualGroupKey = "__manual__"
+
+    /// A mutually-exclusive open/closed binding for one group's side flyout:
+    /// opening one closes any other, so only a single flyout is ever on screen.
+    private func flyoutBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { openGroupKey == key },
+            set: { isOpen in openGroupKey = isOpen ? key : (openGroupKey == key ? nil : openGroupKey) }
+        )
     }
 
     /// Subscriptions that actually carry nodes, in profile order.
     private var subscriptionGroups: [LinkoKit.Subscription] {
         appState.subscriptions.filter { !$0.nodes.isEmpty }
-    }
-
-    /// A subtle entry into the Dashboard's 节点 page for adding/editing nodes.
-    private var manageNodesRow: some View {
-        Button {
-            appState.openWindow(id: WindowID.dashboard, using: { openWindow(id: $0) })
-        } label: {
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "slider.horizontal.3").font(.caption)
-                Text("管理节点…").font(Theme.Font.caption)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Theme.Color.secondaryLabel)
-            .padding(.horizontal, Theme.Spacing.xs)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .hoverHighlight(cornerRadius: Theme.Radius.small)
     }
 
     // MARK: - Footer
@@ -383,54 +383,43 @@ struct MenuContentView: View {
 // MARK: - Node group menu
 // =============================================================================
 
-/// One node group rendered as a Surge-style flyout: a compact panel row
-/// (group name + the node selected within it + a chevron) that opens a popup
-/// menu listing the group's nodes with a checkmark on the active one, each
+/// One node group rendered as a Surge-style flyout: a compact panel row (group
+/// name + the node selected within it + a chevron) whose node list flies out to
+/// the **right** of the row in a popover — not a downward pull-down menu. The
+/// popover lists the group's nodes with a checkmark on the active one, each
 /// labeled with its latency, plus a "延迟测试" action. Selecting a node sets the
 /// active node for the whole profile (linko has a single `proxy` selector), so
 /// only the group that owns the active node shows a selection in its row.
-private struct NodeGroupMenu: View {
+///
+/// Why a popover instead of `Menu`: a SwiftUI `Menu` renders an AppKit pull-down
+/// that drops *down* from the row with no public way to steer it sideways, so
+/// the `chevron.right` promised a side flyout the menu never delivered. A
+/// `.popover(arrowEdge: .trailing)` escapes the self-sizing `MenuBarExtra(.window)`
+/// panel bounds and emerges from the row's trailing edge (the system flips it to
+/// the leading side only when the screen edge leaves no room), and — unlike the
+/// panel itself — gives its `ScrollView` a real height, so long node lists scroll.
+private struct NodeGroupRow: View {
     @EnvironmentObject private var appState: AppState
 
     let title: String
-    let symbolName: String
     let nodes: [ProxyNode]
     /// Whether the Clash API is live, so a delay test can run.
     let canTestDelays: Bool
+    /// Drives this group's side flyout; mutually exclusive across groups.
+    @Binding var isOpen: Bool
 
     var body: some View {
-        Menu {
-            Button {
-                appState.testDelays()
-            } label: {
-                Label("延迟测试", systemImage: "bolt")
-            }
-            .disabled(!canTestDelays)
-
-            Divider()
-
-            // An inline Picker renders each node as a menu item with a native
-            // checkmark on the selected one; its binding drives node selection.
-            Picker("节点", selection: selectionBinding) {
-                ForEach(nodes) { node in
-                    Text(label(for: node)).tag(node.id as UUID?)
-                }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
+        Button {
+            isOpen.toggle()
         } label: {
             rowLabel
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-    }
-
-    /// Reads the profile's selected node; writing selects the chosen node.
-    private var selectionBinding: Binding<UUID?> {
-        Binding(
-            get: { appState.preferences.selectedNodeID },
-            set: { if let id = $0 { appState.selectNode(id: id) } }
-        )
+        .buttonStyle(.plain)
+        .hoverHighlight(cornerRadius: Theme.Radius.small)
+        .popover(isPresented: $isOpen, attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
+            NodeFlyoutList(title: title, nodes: nodes, canTestDelays: canTestDelays)
+                .environmentObject(appState)
+        }
     }
 
     /// The node in this group that is currently active, if any.
@@ -440,10 +429,6 @@ private struct NodeGroupMenu: View {
 
     private var rowLabel: some View {
         HStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: symbolName)
-                .font(.body)
-                .foregroundStyle(Theme.Color.secondaryLabel)
-                .frame(width: 20, alignment: .center)
             Text(title)
                 .font(Theme.Font.bodyEmphasized)
                 .foregroundStyle(Theme.Color.label)
@@ -457,19 +442,113 @@ private struct NodeGroupMenu: View {
                 .truncationMode(.middle)
             Image(systemName: "chevron.right")
                 .font(Theme.Font.caption2)
-                .foregroundStyle(Theme.Color.tertiaryLabel)
+                .foregroundStyle(isOpen ? Theme.Color.accent : Theme.Color.tertiaryLabel)
         }
         .padding(.horizontal, Theme.Spacing.xs)
         .padding(.vertical, Theme.Spacing.xs - 1)
         .contentShape(Rectangle())
     }
+}
 
-    /// A node's menu label: name, plus its measured latency when known.
-    private func label(for node: ProxyNode) -> String {
-        if let delay = appState.nodeDelays[node.id] {
-            return "\(node.name)   \(delay) ms"
+// =============================================================================
+// MARK: - Node flyout list
+// =============================================================================
+
+/// The side flyout for one node group: a compact "延迟测试" header followed by a
+/// scrollable list of the group's nodes, each with a leading checkmark on the
+/// active one, its name, and its measured latency. Tapping a node selects it for
+/// the whole profile and dismisses the flyout.
+private struct NodeFlyoutList: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let nodes: [ProxyNode]
+    let canTestDelays: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                VStack(spacing: 1) {
+                    ForEach(nodes) { node in
+                        nodeRow(node)
+                    }
+                }
+                .padding(Theme.Spacing.xs)
+            }
         }
-        return node.name
+        .frame(width: 260)
+        .frame(maxHeight: 380)
+    }
+
+    private var header: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Text(title)
+                .font(Theme.Font.caption.weight(.semibold))
+                .foregroundStyle(Theme.Color.secondaryLabel)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: Theme.Spacing.xs)
+            Button {
+                appState.testDelays()
+            } label: {
+                HStack(spacing: Theme.Spacing.xxs) {
+                    if appState.isTestingDelays {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "bolt.fill").font(.caption2)
+                    }
+                    Text("测延迟").font(Theme.Font.caption)
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(appState.isTestingDelays || !canTestDelays)
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    private func nodeRow(_ node: ProxyNode) -> some View {
+        let isSelected = node.id == appState.preferences.selectedNodeID
+        return Button {
+            appState.selectNode(id: node.id)
+            dismiss()
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.Color.accent)
+                    .frame(width: 14)
+                    .opacity(isSelected ? 1 : 0)
+                Text(node.name)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: Theme.Spacing.xs)
+                if let delay = appState.nodeDelays[node.id] {
+                    Text("\(delay) ms")
+                        .font(Theme.Font.caption.monospacedDigit())
+                        .foregroundStyle(latencyTint(delay))
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.xs - 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(cornerRadius: Theme.Radius.small)
+    }
+
+    /// Green / amber / red latency tint: fast (< 200 ms) / usable / slow.
+    private func latencyTint(_ delay: Int) -> Color {
+        switch delay {
+        case ..<200: return Theme.Color.active
+        case ..<500: return Theme.Color.warning
+        default: return Theme.Color.error
+        }
     }
 }
 
