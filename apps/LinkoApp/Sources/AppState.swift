@@ -21,6 +21,10 @@ final class AppState: ObservableObject {
 
     @Published private(set) var preferences: AppPreferences
     @Published private(set) var subscriptions: [LinkoKit.Subscription]
+    /// Hand-added nodes that belong to no subscription — the user's own
+    /// editable/deletable entries. Mirrors `profiles.active.manualNodes`; every
+    /// edit folds back into the active profile via `syncActiveProfile()`.
+    @Published private(set) var manualNodes: [ProxyNode]
     /// Value-type summaries of every stored profile, in order. Mirrors
     /// `profiles` and is the binding source for the profile management UI.
     @Published private(set) var profileSummaries: [ProfileSummary] = []
@@ -157,6 +161,7 @@ final class AppState: ObservableObject {
         // The published single-config state mirrors the active profile.
         self.preferences = collection.active.preferences
         self.subscriptions = collection.active.subscriptions
+        self.manualNodes = collection.active.manualNodes
 
         if !loadNotices.isEmpty {
             self.lastErrorMessage = loadNotices.joined(separator: "\n")
@@ -215,7 +220,7 @@ final class AppState: ObservableObject {
     // MARK: - Derived state
 
     var allNodes: [ProxyNode] {
-        subscriptions.flatMap(\.nodes)
+        subscriptions.flatMap(\.nodes) + manualNodes
     }
 
     var selectedNode: ProxyNode? {
@@ -1004,6 +1009,90 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Manual node management
+    //
+    // Manual nodes are the user's hand-added, fully editable entries
+    // (subscription nodes stay read-only because a refresh overwrites them).
+    // They live in `manualNodes`, are appended after subscription nodes in
+    // `allNodes`, and flow into the generated config exactly like any other
+    // node. Every mutation persists by folding back into the active profile.
+
+    /// Whether `id` is a hand-added manual node — the editable/deletable set.
+    /// The UI uses this to decide whether to offer edit/delete, or only the
+    /// read-only detail plus "复制为可编辑节点".
+    func isManualNode(_ id: UUID) -> Bool {
+        manualNodes.contains { $0.id == id }
+    }
+
+    /// Appends a new manual node and persists. Selects it when nothing was
+    /// selected yet so the first hand-added node becomes usable immediately;
+    /// otherwise the selection is untouched (a brand-new node is not routed
+    /// until the user picks it, so the running config is undisturbed).
+    func addManualNode(_ node: ProxyNode) {
+        manualNodes.append(node)
+        persistManualNodes()
+        if preferences.selectedNodeID == nil {
+            selectNode(id: node.id)
+        }
+    }
+
+    /// Replaces the manual node sharing `node.id`. If it is the node currently
+    /// routing traffic, the running config is regenerated so the edit takes
+    /// effect at once. Non-manual ids (subscription nodes) are ignored.
+    func updateManualNode(_ node: ProxyNode) async {
+        guard let index = manualNodes.firstIndex(where: { $0.id == node.id }) else { return }
+        manualNodes[index] = node
+        nodeDelays[node.id] = nil  // server/credentials may have changed; stale delay.
+        persistManualNodes()
+        if isProxyActive, preferences.selectedNodeID == node.id {
+            await reconfigureRunningProxy()
+        }
+    }
+
+    /// Removes the manual node with `id`. If it backed the selection, the
+    /// selection is repaired to the first remaining node and (when running) the
+    /// config is regenerated. Non-manual ids are ignored.
+    func removeManualNode(id: UUID) async {
+        guard manualNodes.contains(where: { $0.id == id }) else { return }
+        let backedSelection = preferences.selectedNodeID == id
+        manualNodes.removeAll { $0.id == id }
+        nodeDelays[id] = nil
+        persistManualNodes()
+        if backedSelection {
+            preferences.selectedNodeID = allNodes.first?.id
+            persistPreferences()
+            if isProxyActive {
+                await reconfigureRunningProxy()
+            }
+        }
+    }
+
+    /// Clones any node — subscription or manual — into an independent, editable
+    /// manual node with a fresh id and a deduplicated "（副本）" name, then
+    /// returns the new node's id so the caller can open it in the editor. This
+    /// is how a read-only subscription node becomes editable without fighting
+    /// the refresh semantics that would overwrite an in-place edit.
+    @discardableResult
+    func duplicateNodeToManual(id: UUID) -> UUID? {
+        guard let source = allNodes.first(where: { $0.id == id }) else { return nil }
+        var copy = source
+        copy.id = UUID()
+        copy.name = uniqueManualNodeName(base: source.name + "（副本）")
+        manualNodes.append(copy)
+        persistManualNodes()
+        return copy.id
+    }
+
+    /// A manual-node name not already taken by another manual node, appending a
+    /// numeric suffix on collision so duplicates stay distinguishable.
+    private func uniqueManualNodeName(base: String) -> String {
+        let existing = Set(manualNodes.map(\.name))
+        guard existing.contains(base) else { return base }
+        var n = 2
+        while existing.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
     /// Enables/disables automatic subscription refresh and sets the interval
     /// (minutes, clamped to `AppPreferences.minAutoUpdateMinutes`). Persists
     /// and (re)schedules the background refresh Task. Filled in by the
@@ -1248,6 +1337,12 @@ final class AppState: ObservableObject {
         syncActiveProfile()
     }
 
+    /// Manual nodes live only inside the profile (no legacy mirror file), so
+    /// persisting them is just a fold-back into the active profile on disk.
+    private func persistManualNodes() {
+        syncActiveProfile()
+    }
+
     // MARK: - Profile synchronization
 
     /// Folds the current published `preferences` + `subscriptions` back into the
@@ -1259,9 +1354,13 @@ final class AppState: ObservableObject {
     private func syncActiveProfile() {
         var active = profiles.active
         // Skip a redundant write when nothing actually changed.
-        guard active.preferences != preferences || active.subscriptions != subscriptions else { return }
+        guard active.preferences != preferences
+            || active.subscriptions != subscriptions
+            || active.manualNodes != manualNodes
+        else { return }
         active.preferences = preferences
         active.subscriptions = subscriptions
+        active.manualNodes = manualNodes
         profiles = ProfileStore.upsert(active, in: profiles)
         saveProfiles()
     }
@@ -1386,6 +1485,7 @@ extension AppState: ProfileManaging {
         let previousCollection = profiles
         let previousPreferences = preferences
         let previousSubscriptions = subscriptions
+        let previousManualNodes = manualNodes
         let target = activated.active
 
         await runSerializedLifecycle { [self] in
@@ -1424,7 +1524,8 @@ extension AppState: ProfileManaging {
                     collection: collectionRollback,
                     profile: collectionRollback.active,
                     preferencesOverride: previousPreferences,
-                    subscriptionsOverride: previousSubscriptions
+                    subscriptionsOverride: previousSubscriptions,
+                    manualNodesOverride: previousManualNodes
                 )
                 lastErrorMessage = "切换配置档案失败，已恢复上一个档案：\(reason)"
                 switch preferences.proxyMode {
@@ -1445,11 +1546,13 @@ extension AppState: ProfileManaging {
         collection: ProfileCollection,
         profile: Profile,
         preferencesOverride: AppPreferences? = nil,
-        subscriptionsOverride: [LinkoKit.Subscription]? = nil
+        subscriptionsOverride: [LinkoKit.Subscription]? = nil,
+        manualNodesOverride: [ProxyNode]? = nil
     ) {
         profiles = collection
         preferences = preferencesOverride ?? profile.preferences
         subscriptions = subscriptionsOverride ?? profile.subscriptions
+        manualNodes = manualNodesOverride ?? profile.manualNodes
         persistJSON(preferences, to: preferencesFileURL, what: "偏好设置")
         persistJSON(subscriptions, to: subscriptionsFileURL, what: "订阅")
         saveProfiles()
