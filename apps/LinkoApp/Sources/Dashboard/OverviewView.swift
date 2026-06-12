@@ -16,17 +16,49 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 networkTakeoverSection
+                if let reason = coreFailureReason {
+                    failureNotice(reason)
+                }
                 statusGrid
                 if appState.isCoreRunning {
                     liveThroughput
                     totalsCard
-                } else {
+                } else if coreFailureReason == nil {
                     stoppedNotice
                 }
             }
             .padding(Theme.Spacing.lg)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    /// The core's failure reason, if it failed to start (e.g. config validation
+    /// blocked it). Surfaced in user terms instead of an always-on, technical
+    /// "core status / PID" card.
+    private var coreFailureReason: String? {
+        if case .failed(let reason) = appState.coreState { return reason }
+        return nil
+    }
+
+    private func failureNotice(_ reason: String) -> some View {
+        Card {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.title3)
+                    .foregroundStyle(Theme.Color.error)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("启动失败")
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(Theme.Color.label)
+                    Text(reason)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.secondaryLabel)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // MARK: - Network takeover (proxy mode + start)
@@ -74,13 +106,6 @@ struct OverviewView: View {
 
     private var statusGrid: some View {
         LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
-            statusCard(
-                title: "核心状态",
-                symbolName: "cpu",
-                kind: coreStatusKind,
-                primary: coreStatusTitle,
-                secondary: coreStatusDetail
-            )
             statusCard(
                 title: "当前节点",
                 symbolName: "antenna.radiowaves.left.and.right",
@@ -192,30 +217,6 @@ struct OverviewView: View {
     }
 
     // MARK: - Derived display
-
-    private var coreStatusKind: StatusKind {
-        switch appState.coreState {
-        case .running: return .active
-        case .stopped: return .inactive
-        case .failed: return .error
-        }
-    }
-
-    private var coreStatusTitle: String {
-        switch appState.coreState {
-        case .running: return "运行中"
-        case .stopped: return "未运行"
-        case .failed: return "启动失败"
-        }
-    }
-
-    private var coreStatusDetail: String {
-        switch appState.coreState {
-        case .running(let pid): return "PID \(pid)"
-        case .stopped: return "开启代理以启动"
-        case .failed(let reason): return reason
-        }
-    }
 
     private var nodeDetail: String {
         guard let node = appState.selectedNode else { return "请先导入订阅" }
