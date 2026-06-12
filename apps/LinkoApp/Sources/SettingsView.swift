@@ -381,19 +381,11 @@ private struct AboutSection: View {
 
     var body: some View {
         Section {
-            LabeledContent {
+            LabeledContent("版本") {
                 Text(appVersion)
                     .font(Theme.Font.mono)
                     .foregroundStyle(Theme.Color.secondaryLabel)
                     .textSelection(.enabled)
-            } label: {
-                HStack(spacing: Theme.Spacing.sm) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .frame(width: 22, height: 22)
-                    Text("Linko")
-                        .foregroundStyle(Theme.Color.label)
-                }
             }
         } header: {
             Text("关于")
