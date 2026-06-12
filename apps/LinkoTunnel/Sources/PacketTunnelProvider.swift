@@ -1,6 +1,12 @@
 import Foundation
 import Libbox
 @preconcurrency import NetworkExtension
+import os
+
+/// Diagnostics logger. Uses `.error` level so entries persist in the unified
+/// log without enabling private/info capture (`log show --predicate
+/// 'subsystem == "com.gumpw.linko.tunnel"'`).
+let tunnelLog = Logger(subsystem: "com.gumpw.linko.tunnel", category: "provider")
 
 /// The NetworkExtension packet-tunnel provider that runs sing-box (1.13.13 via
 /// libbox) in TUN global mode inside the `com.gumpw.linko.tunnel` system
@@ -30,15 +36,46 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         options startOptions: [String: NSObject]?,
         completionHandler: @escaping (Error?) -> Void
     ) {
+        tunnelLog.error("startTunnel: begin")
+        let configContent: String
         do {
-            try startTunnelSynchronously(options: startOptions)
-            completionHandler(nil)
+            // Cheap, non-blocking setup: dirs, LibboxSetup, command server + its
+            // control socket. Sets currentConfig.
+            configContent = try setUpService(options: startOptions)
         } catch {
+            tunnelLog.error("startTunnel: setup FAILED: \(error.localizedDescription, privacy: .public)")
             completionHandler(error)
+            return
+        }
+
+        // Return to NE now, BEFORE bringing the box up. startOrReloadService
+        // blocks until libbox's openTun returns, and openTun applies the tunnel
+        // network settings whose completion NE delivers back on THIS (the NE
+        // start) thread — running it here would deadlock and the session would
+        // hang in "connecting" forever. NE reaches "connected" once openTun
+        // applies the settings from the background box-up below.
+        tunnelLog.error("startTunnel: setup ok, returning; bringing box up in background")
+        completionHandler(nil)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self, let server = self.commandServer else { return }
+            do {
+                tunnelLog.error("startOrReloadService: begin (background)")
+                try server.startOrReloadService(configContent, options: LibboxOverrideOptions())
+                tunnelLog.error("startOrReloadService: done")
+                server.writeMessage(2, message: "started")
+            } catch {
+                tunnelLog.error("startOrReloadService FAILED: \(error.localizedDescription, privacy: .public)")
+                self.cancelTunnelWithError(error)
+            }
         }
     }
 
-    private func startTunnelSynchronously(options startOptions: [String: NSObject]?) throws {
+    /// Non-blocking setup: working dirs, LibboxSetup, command server + control
+    /// socket. Returns the resolved config (also stored in `currentConfig`).
+    /// Does NOT start the box — that blocks and must run off the NE thread.
+    @discardableResult
+    private func setUpService(options startOptions: [String: NSObject]?) throws -> String {
         // A system extension runs as root and CANNOT use the per-user App Group
         // container (`containerURL` returns nil for it, and even when it doesn't
         // root's container is a different directory than the app's). So libbox's
@@ -94,14 +131,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         self.commandServer = server
 
         // 3. Open the command server's control socket (does not start sing-box).
+        tunnelLog.error("setup done, starting command server")
         try server.start()
 
-        // 4. Parse the config, build the box instance, and run it. libbox calls
-        //    back into platform.openTun on its own thread to bring up the utun.
-        let override = LibboxOverrideOptions()
-        try server.startOrReloadService(configContent, options: override)
-
-        server.writeMessage(2, message: "started")
+        // The box itself (startOrReloadService) is started by the caller on a
+        // background thread — see startTunnel — because it blocks on openTun.
+        return configContent
     }
 
     // MARK: - Stop
