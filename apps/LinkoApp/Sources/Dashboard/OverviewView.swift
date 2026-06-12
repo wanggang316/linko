@@ -225,8 +225,11 @@ private struct ProxyControlCard: View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 header
-                Divider().opacity(0.4)
-                LabeledContent {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Text("代理模式")
+                        .font(Theme.Font.body)
+                        .foregroundStyle(Theme.Color.label)
+                    Spacer(minLength: Theme.Spacing.sm)
                     Picker("代理模式", selection: modeBinding) {
                         ForEach(ProxyMode.allCases, id: \.self) { mode in
                             Text(mode.displayName).tag(mode)
@@ -236,10 +239,6 @@ private struct ProxyControlCard: View {
                     .labelsHidden()
                     .fixedSize()
                     .disabled(appState.isSwitchingProxy)
-                } label: {
-                    Text("代理模式")
-                        .font(Theme.Font.body)
-                        .foregroundStyle(Theme.Color.label)
                 }
             }
         }
