@@ -2,9 +2,10 @@ import AppKit
 import LinkoKit
 import SwiftUI
 
-/// Native macOS Settings scene: a grouped `Form` covering local ports, the
-/// sing-box core binary, the delay-test endpoint, and an about section.
-/// Changes are validated, then persisted through `AppState.updatePreferences`.
+/// The 设置 page (a dashboard sidebar pane, reached via the sidebar gear): a
+/// grouped `Form` covering general toggles, local ports, the delay-test
+/// endpoint, software update, and an about section. Changes are validated, then
+/// persisted through `AppState.updatePreferences`.
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -18,8 +19,8 @@ struct SettingsView: View {
             AboutSection()
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 600)
-        .environmentObject(appState)
+        .navigationTitle("设置")
+        .frame(minWidth: 460, minHeight: 360)
     }
 }
 

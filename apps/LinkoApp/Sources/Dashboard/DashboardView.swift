@@ -22,6 +22,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case rules
     case policyGroups
     case dns
+    case settings
 
     var id: String { rawValue }
 
@@ -35,9 +36,10 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     static let routingSections: [DashboardSection] = [.rules, .policyGroups, .dns]
 
     /// Sections that own their own navigation title and toolbar (so the
-    /// dashboard chrome must step aside): the routing panes plus 配置 / 订阅 / 节点.
+    /// dashboard chrome must step aside): the routing panes plus 配置 / 订阅 /
+    /// 节点, and the 设置 page (reached from the sidebar gear, not a group).
     private static let selfChromedSections: [DashboardSection] =
-        profileSections + subscriptionSections + routingSections
+        profileSections + subscriptionSections + routingSections + [.settings]
 
     /// Whether this section owns its own navigation title and toolbar.
     var isRoutingSection: Bool {
@@ -59,6 +61,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .rules: return "规则"
         case .policyGroups: return "策略组"
         case .dns: return "DNS"
+        case .settings: return "设置"
         }
     }
 
@@ -77,6 +80,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .rules: return "arrow.triangle.branch"
         case .policyGroups: return "rectangle.3.group"
         case .dns: return "globe"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -112,14 +116,28 @@ struct DashboardView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .task {
+            // Honor a deep-link requested before the window appeared (e.g. the
+            // menu gear opening straight to 设置).
+            consumePendingSection()
             // Begin streaming when the window appears; the view model is a
             // no-op while the core is stopped and auto-subscribes when it
             // comes up, so this is safe to call unconditionally.
             viewModel.start()
         }
+        .onChange(of: appState.pendingDashboardSection) { _, _ in
+            // Deep-link arriving while the window is already open.
+            consumePendingSection()
+        }
         .onDisappear {
             viewModel.stop()
         }
+    }
+
+    /// Applies and clears a pending section deep-link from `AppState`.
+    private func consumePendingSection() {
+        guard let pending = appState.pendingDashboardSection else { return }
+        selection = pending
+        appState.pendingDashboardSection = nil
     }
 
     // MARK: - Sidebar
@@ -164,6 +182,18 @@ struct DashboardView: View {
         HStack(spacing: Theme.Spacing.xs) {
             StatusPill(coreStatusTitle, kind: coreStatusKind)
             Spacer(minLength: 0)
+            Button {
+                selection = .settings
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(selection == .settings ? Theme.Color.accent : Theme.Color.secondaryLabel)
+                    .frame(width: 26, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverHighlight(cornerRadius: Theme.Radius.small)
+            .help("设置")
         }
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
@@ -198,6 +228,8 @@ struct DashboardView: View {
             PolicyGroupsView()
         case .dns:
             DNSSettingsView()
+        case .settings:
+            SettingsView()
         }
     }
 

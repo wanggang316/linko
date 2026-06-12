@@ -62,6 +62,10 @@ final class AppState: ObservableObject {
     /// meaningful in `.tun` proxy mode; `.invalid`/`.disconnected` otherwise.
     @Published private(set) var tunnelStatus: NEVPNStatus = .invalid
     @Published private(set) var isTestingDelays = false
+    /// A dashboard section the menu wants surfaced when it opens the window
+    /// (e.g. the gear button deep-links to 设置). The dashboard consumes and
+    /// clears it. `nil` means "no pending navigation".
+    @Published var pendingDashboardSection: DashboardSection?
     /// Last measured delay (ms) per node id; cleared when the core stops.
     @Published private(set) var nodeDelays: [UUID: Int] = [:]
     /// Last error/notice message surfaced in the menu, if any.

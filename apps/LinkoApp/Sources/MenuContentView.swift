@@ -12,7 +12,6 @@ import SwiftUI
 struct MenuContentView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     /// Self-contained traffic meter for the header rates, so the menu does not
     /// depend on the Dashboard view model being present in its environment.
@@ -302,8 +301,8 @@ struct MenuContentView: View {
                 UpdaterController.shared.checkForUpdates()
             }
             FooterButton(symbolName: "gearshape", help: "设置") {
-                NSApp.activate(ignoringOtherApps: true)
-                openSettings()
+                appState.pendingDashboardSection = .settings
+                appState.openWindow(id: WindowID.dashboard, using: { openWindow(id: $0) })
             }
             Spacer(minLength: 0)
             FooterButton(symbolName: "power", help: "退出", tint: Theme.Color.error) {
