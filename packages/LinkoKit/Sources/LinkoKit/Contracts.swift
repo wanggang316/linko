@@ -284,25 +284,57 @@ public protocol RuleImporting {
 
 // MARK: - Subscription parsing
 
+/// The subscription/clipboard format a payload was recognized as. Surfaced to
+/// the UI so the import sheet can tell the user what it understood.
+public enum SubscriptionFormat: String, Equatable, Sendable {
+    /// Clash / Clash.Meta YAML with a `proxies:` list.
+    case clashYAML
+    /// A V2Ray-style subscription: one Base64 blob that decodes to a list of
+    /// `scheme://…` share links.
+    case base64Links
+    /// Plain text holding one or more `scheme://…` share links, one per line.
+    case shareLinks
+
+    /// Short Chinese label for the import sheet ("识别为 …").
+    public var displayName: String {
+        switch self {
+        case .clashYAML: return "Clash 订阅"
+        case .base64Links: return "V2Ray（Base64）订阅"
+        case .shareLinks: return "节点链接"
+        }
+    }
+}
+
 /// Outcome of parsing a subscription document: usable nodes plus warnings for
 /// entries that were skipped (unknown type, missing required fields).
 public struct SubscriptionParseResult: Equatable, Sendable {
     public let nodes: [ProxyNode]
     public let warnings: [String]
+    /// The format the payload was recognized as.
+    public let format: SubscriptionFormat
 
-    public init(nodes: [ProxyNode], warnings: [String] = []) {
+    public init(
+        nodes: [ProxyNode],
+        warnings: [String] = [],
+        format: SubscriptionFormat = .clashYAML
+    ) {
         self.nodes = nodes
         self.warnings = warnings
+        self.format = format
     }
 }
 
-/// Parses Clash YAML subscription documents into `ProxyNode`s.
+/// Parses node subscriptions into `ProxyNode`s. Two entry points:
+/// - `parse(clashYAML:)` — strictly Clash / Clash.Meta YAML (`proxies:`).
+/// - `parse(subscription:)` — format-detecting: Clash YAML, a Base64 V2Ray
+///   subscription, or bare `scheme://…` share links.
 ///
-/// Implemented by `SubscriptionParser` (Sources/LinkoKit/Subscription/) using
-/// Yams. Malformed or unsupported entries are skipped with a warning, never a
-/// crash; a throw is reserved for documents that are not valid Clash YAML at all.
+/// Implemented by `SubscriptionParser` (Sources/LinkoKit/Subscription/).
+/// Malformed or unsupported entries are skipped with a warning, never a crash;
+/// a throw is reserved for payloads that match no known format at all.
 public protocol SubscriptionParsing {
     func parse(clashYAML: String) throws -> SubscriptionParseResult
+    func parse(subscription content: String) throws -> SubscriptionParseResult
 }
 
 // MARK: - Multi-profile management
