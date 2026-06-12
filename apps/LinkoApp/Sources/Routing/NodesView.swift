@@ -269,6 +269,23 @@ struct NodesView: View {
             .help("按协议筛选节点")
         }
         ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button {
+                    appState.openConfigFileInEditor()
+                } label: {
+                    Label("在编辑器中打开", systemImage: "square.and.pencil")
+                }
+                Button {
+                    appState.revealConfigFileInFinder()
+                } label: {
+                    Label("在访达中显示", systemImage: "folder")
+                }
+            } label: {
+                Label("配置原文件", systemImage: "curlybraces")
+            }
+            .help("查看 / 编辑当前生成的 sing-box 配置原文件（config.json，每次启动或改节点会自动重新生成）")
+        }
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 editor = .create
             } label: {

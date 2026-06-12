@@ -1251,6 +1251,38 @@ final class AppState: ObservableObject {
         try data.write(to: configFileURL, options: .atomic)
     }
 
+    // MARK: - Config-file inspection
+
+    /// Regenerates the active profile's sing-box config from the current nodes +
+    /// preferences and returns its on-disk URL — the exact JSON the core runs in
+    /// system-proxy mode. Surfacing the generated config keeps linko auditable:
+    /// the user can read (and, for debugging, hand-tweak) the real configuration.
+    /// The file is rebuilt on every start / node change, so manual edits are
+    /// transient. Returns `nil` (with a surfaced notice) if the build fails.
+    @discardableResult
+    func regenerateConfigFileForInspection() -> URL? {
+        do {
+            try writeConfigFile(nodes: allNodes)
+            return configFileURL
+        } catch {
+            lastErrorMessage = "生成配置文件失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Opens the freshly-generated sing-box config in the user's default editor
+    /// for the `.json` type. A no-op (with a surfaced notice) if generation fails.
+    func openConfigFileInEditor() {
+        guard let url = regenerateConfigFileForInspection() else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveals the freshly-generated sing-box config in Finder.
+    func revealConfigFileInFinder() {
+        guard let url = regenerateConfigFileForInspection() else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     /// Builds a `.tun`-mode sing-box config regardless of the persisted mode.
     /// Used by the TUN start path (the mode is already `.tun` there, but this
     /// makes the intent explicit and independent of caller ordering).
