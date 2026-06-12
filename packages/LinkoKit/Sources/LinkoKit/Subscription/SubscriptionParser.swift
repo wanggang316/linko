@@ -33,7 +33,41 @@ public enum SubscriptionParserError: Error, Equatable, LocalizedError {
 ///   (`congestion-controller`/`udp-relay-mode`) are folded into `pluginOpts`
 ///   as a stable `key=value;` carrier the config builder can re-emit.
 public struct SubscriptionParser: SubscriptionParsing {
+    private let shareLinkParser = ShareLinkParser()
+
     public init() {}
+
+    /// Format-detecting entry point used by every import path. Detection order:
+    /// 1. bare `scheme://…` share links (one per line);
+    /// 2. a V2Ray subscription — a single Base64 blob that decodes to share
+    ///    links (or, occasionally, to Clash YAML);
+    /// 3. Clash / Clash.Meta YAML.
+    /// Throws only when the payload matches no known format.
+    public func parse(subscription content: String) throws -> SubscriptionParseResult {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw SubscriptionParserError.invalidYAML(detail: "empty document")
+        }
+
+        // 1. Bare share links.
+        if ShareLinkParser.containsShareLink(trimmed) {
+            return shareLinkParser.parseLinks(trimmed, format: .shareLinks)
+        }
+
+        // 2. Base64 blob — V2Ray subscription, or a Base64-wrapped Clash YAML.
+        if let decoded = ShareLinkParser.decodeBase64(trimmed),
+           let text = String(data: decoded, encoding: .utf8) {
+            if ShareLinkParser.containsShareLink(text) {
+                return shareLinkParser.parseLinks(text, format: .base64Links)
+            }
+            if let clash = try? parse(clashYAML: text), !clash.nodes.isEmpty {
+                return clash
+            }
+        }
+
+        // 3. Clash YAML (its own error becomes the "unrecognized" failure).
+        return try parse(clashYAML: content)
+    }
 
     public func parse(clashYAML: String) throws -> SubscriptionParseResult {
         let root: Any?

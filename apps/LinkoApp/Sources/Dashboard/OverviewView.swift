@@ -15,17 +15,50 @@ struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                ProxyControlCard()
+                if let reason = coreFailureReason {
+                    failureNotice(reason)
+                }
                 statusGrid
                 if appState.isCoreRunning {
                     liveThroughput
                     totalsCard
-                } else {
+                } else if coreFailureReason == nil {
                     stoppedNotice
                 }
             }
             .padding(Theme.Spacing.lg)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    /// The core's failure reason, if it failed to start (e.g. config validation
+    /// blocked it). Surfaced in user terms instead of an always-on, technical
+    /// "core status / PID" card.
+    private var coreFailureReason: String? {
+        if case .failed(let reason) = appState.coreState { return reason }
+        return nil
+    }
+
+    private func failureNotice(_ reason: String) -> some View {
+        Card {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.title3)
+                    .foregroundStyle(Theme.Color.error)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("启动失败")
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(Theme.Color.label)
+                    Text(reason)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.secondaryLabel)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // MARK: - Stopped notice
@@ -43,7 +76,7 @@ struct OverviewView: View {
                     Text("核心未运行")
                         .font(Theme.Font.heading)
                         .foregroundStyle(Theme.Color.secondaryLabel)
-                    Text("开启系统代理后，这里会显示实时速率与累计流量。")
+                    Text("开启代理后，这里会显示实时速率与累计流量。")
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Color.tertiaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
@@ -58,25 +91,11 @@ struct OverviewView: View {
     private var statusGrid: some View {
         LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
             statusCard(
-                title: "核心状态",
-                symbolName: "cpu",
-                kind: coreStatusKind,
-                primary: coreStatusTitle,
-                secondary: coreStatusDetail
-            )
-            statusCard(
                 title: "当前节点",
                 symbolName: "antenna.radiowaves.left.and.right",
                 kind: appState.selectedNode == nil ? .inactive : .active,
                 primary: appState.selectedNode?.name ?? "未选择",
                 secondary: nodeDetail
-            )
-            statusCard(
-                title: "系统代理",
-                symbolName: "network",
-                kind: appState.isSystemProxyEnabled ? .active : .inactive,
-                primary: appState.isSystemProxyEnabled ? "已开启" : "已关闭",
-                secondary: "混合端口 \(appState.preferences.mixedPort)"
             )
         }
     }
@@ -183,32 +202,95 @@ struct OverviewView: View {
 
     // MARK: - Derived display
 
-    private var coreStatusKind: StatusKind {
-        switch appState.coreState {
-        case .running: return .active
-        case .stopped: return .inactive
-        case .failed: return .error
-        }
-    }
-
-    private var coreStatusTitle: String {
-        switch appState.coreState {
-        case .running: return "运行中"
-        case .stopped: return "未运行"
-        case .failed: return "启动失败"
-        }
-    }
-
-    private var coreStatusDetail: String {
-        switch appState.coreState {
-        case .running(let pid): return "PID \(pid)"
-        case .stopped: return "开启系统代理以启动"
-        case .failed(let reason): return reason
-        }
-    }
-
     private var nodeDetail: String {
         guard let node = appState.selectedNode else { return "请先导入订阅" }
         return "\(node.protocolType.rawValue.uppercased()) · \(node.server):\(node.port)"
+    }
+}
+
+// =============================================================================
+// MARK: - ProxyControlCard
+// =============================================================================
+
+/// The proxy control: a segmented picker for the (mutually exclusive) mode and
+/// a switch that starts/stops it. Switching mode while running migrates the live
+/// connection; the switch reflects whichever mode is active.
+private struct ProxyControlCard: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var mode: ProxyMode { appState.preferences.proxyMode }
+    private var isActive: Bool { appState.isProxyActive }
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                header
+                HStack(spacing: Theme.Spacing.sm) {
+                    Text("代理模式")
+                        .font(Theme.Font.body)
+                        .foregroundStyle(Theme.Color.label)
+                    Spacer(minLength: Theme.Spacing.sm)
+                    Picker("代理模式", selection: modeBinding) {
+                        ForEach(ProxyMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(appState.isSwitchingProxy)
+                }
+            }
+        }
+    }
+
+    /// Title + status pill on the left, the start switch pinned to the top-right.
+    private var header: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: "shield.lefthalf.filled")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.Color.accent)
+            Text("网络接管")
+                .font(Theme.Font.heading)
+                .foregroundStyle(Theme.Color.label)
+            StatusPill(statusTitle, kind: statusKind)
+            Spacer(minLength: Theme.Spacing.xs)
+            if appState.isSwitchingProxy {
+                ProgressView().controlSize(.small)
+            }
+            Toggle("", isOn: startBinding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .tint(Theme.Color.accent)
+                .disabled(appState.isSwitchingProxy)
+        }
+    }
+
+    /// Switching the mode migrates the live connection when active (see
+    /// `AppState.setProxyMode`).
+    private var modeBinding: Binding<ProxyMode> {
+        Binding(
+            get: { mode },
+            set: { newMode in Task { await appState.setProxyMode(newMode) } }
+        )
+    }
+
+    /// Starts / stops the selected mode.
+    private var startBinding: Binding<Bool> {
+        Binding(
+            get: { isActive },
+            set: { enabled in Task { await appState.setSystemProxy(enabled: enabled) } }
+        )
+    }
+
+    private var statusKind: StatusKind {
+        if appState.isSwitchingProxy { return .warning }
+        return isActive ? .active : .inactive
+    }
+
+    private var statusTitle: String {
+        if appState.isSwitchingProxy { return "切换中" }
+        return isActive ? "已接管" : "未启用"
     }
 }

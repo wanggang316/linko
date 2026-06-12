@@ -19,6 +19,12 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     public var name: String
     /// This profile's node subscriptions and their last-parsed nodes.
     public var subscriptions: [Subscription]
+    /// Hand-added nodes that do not belong to any subscription. Unlike
+    /// subscription nodes (overwritten on every refresh), these are the
+    /// user's own editable/deletable entries and survive subscription
+    /// updates. Tolerantly decoded so profiles persisted before this feature
+    /// load with an empty set.
+    public var manualNodes: [ProxyNode]
     /// This profile's selection/routing/mode/port settings.
     public var preferences: AppPreferences
     /// Creation timestamp; used for stable ordering and as a migration marker.
@@ -35,6 +41,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         id: UUID = UUID(),
         name: String,
         subscriptions: [Subscription] = [],
+        manualNodes: [ProxyNode] = [],
         preferences: AppPreferences = .default,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -42,6 +49,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.id = id
         self.name = name
         self.subscriptions = subscriptions
+        self.manualNodes = manualNodes
         self.preferences = preferences
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -52,16 +60,20 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? Self.defaultProfileName
         self.subscriptions = try c.decodeIfPresent([Subscription].self, forKey: .subscriptions) ?? []
+        self.manualNodes = try c.decodeIfPresent([ProxyNode].self, forKey: .manualNodes) ?? []
         self.preferences = try c.decodeIfPresent(AppPreferences.self, forKey: .preferences) ?? .default
         let now = Date()
         self.createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? now
         self.updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? now
     }
 
-    /// All nodes across this profile's subscriptions, in subscription order —
-    /// the candidate set for `preferences.selectedNodeID`.
+    /// All selectable nodes — every subscription's nodes (in subscription
+    /// order) followed by the hand-added `manualNodes`. This is the candidate
+    /// set for `preferences.selectedNodeID` and the input the config builder
+    /// turns into outbounds; the manual-node suffix keeps outbound-tag order
+    /// stable as subscriptions refresh.
     public var allNodes: [ProxyNode] {
-        subscriptions.flatMap(\.nodes)
+        subscriptions.flatMap(\.nodes) + manualNodes
     }
 
     /// Returns a deep copy under a new identity and name, with timestamps reset
@@ -83,6 +95,13 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
             }
             return copy
         }
+        let copiedManualNodes: [ProxyNode] = manualNodes.map { node in
+            var n = node
+            let freshID = UUID()
+            idMap[node.id] = freshID
+            n.id = freshID
+            return n
+        }
         var copiedPreferences = preferences
         if let oldSelection = preferences.selectedNodeID {
             copiedPreferences.selectedNodeID = idMap[oldSelection]
@@ -91,6 +110,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
             id: UUID(),
             name: newName,
             subscriptions: copiedSubscriptions,
+            manualNodes: copiedManualNodes,
             preferences: copiedPreferences,
             createdAt: now,
             updatedAt: now

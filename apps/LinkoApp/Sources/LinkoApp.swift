@@ -40,11 +40,6 @@ struct LinkoApp: App {
                 .environmentObject(appState)
         }
         .windowResizability(.contentSize)
-
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-        }
     }
 
     /// The menu-bar glyph. The brand smiley (a template image, so the system

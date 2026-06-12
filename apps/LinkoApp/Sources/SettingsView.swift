@@ -2,9 +2,10 @@ import AppKit
 import LinkoKit
 import SwiftUI
 
-/// Native macOS Settings scene: a grouped `Form` covering local ports, the
-/// sing-box core binary, the delay-test endpoint, and an about section.
-/// Changes are validated, then persisted through `AppState.updatePreferences`.
+/// The 设置 page (a dashboard sidebar pane, reached via the sidebar gear): a
+/// grouped `Form` covering general toggles, local ports, the delay-test
+/// endpoint, software update, and an about section. Changes are validated, then
+/// persisted through `AppState.updatePreferences`.
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -12,15 +13,14 @@ struct SettingsView: View {
         Form {
             StatusSection()
             GeneralSection()
-            ModeSection()
             PortsSection()
-            CoreSection()
             DelayTestSection()
+            UpdateSection()
             AboutSection()
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 600)
-        .environmentObject(appState)
+        .navigationTitle("设置")
+        .frame(minWidth: 460, minHeight: 360)
     }
 }
 
@@ -142,104 +142,36 @@ private struct GeneralSection: View {
 }
 
 // =============================================================================
-// MARK: - Proxy mode
-// =============================================================================
-
-/// Selects how traffic is intercepted: the local system proxy (M1) or TUN
-/// global mode (M2, runs inside a NetworkExtension system extension). Switching
-/// modes while the proxy is on tears down the old mode and brings up the new
-/// one through `AppState.setProxyMode`.
-private struct ModeSection: View {
-    @EnvironmentObject private var appState: AppState
-
-    var body: some View {
-        Section {
-            Picker(selection: modeBinding) {
-                ForEach(ProxyMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("代理模式")
-                        Text(modeDescription)
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.secondaryLabel)
-                    }
-                } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(Theme.Color.accent)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(appState.isSwitchingProxy)
-
-            if appState.preferences.proxyMode == .tun {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("TUN 为实验性功能")
-                            .foregroundStyle(Theme.Color.label)
-                        Text("系统扩展在 macOS 26 上的全新激活存在已知系统级问题，可能无法加载（报“Extension not found”）。日常请使用「系统代理」模式；TUN 在 macOS 15 等系统上可正常工作，首次启用需在「系统设置 › 通用 › 登录项与扩展 › 网络扩展」批准。")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.secondaryLabel)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } icon: {
-                    Image(systemName: "flask")
-                        .foregroundStyle(Theme.Color.warning)
-                }
-            }
-        } header: {
-            Text("代理模式")
-        } footer: {
-            Text("切换模式会在代理开启时自动迁移当前连接。")
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.Color.secondaryLabel)
-        }
-    }
-
-    private var modeDescription: String {
-        switch appState.preferences.proxyMode {
-        case .systemProxy:
-            return "仅接管遵循系统代理设置的应用"
-        case .tun:
-            return "虚拟网卡接管全部流量（全局）"
-        }
-    }
-
-    private var modeBinding: Binding<ProxyMode> {
-        Binding(
-            get: { appState.preferences.proxyMode },
-            set: { newMode in
-                Task { await appState.setProxyMode(newMode) }
-            }
-        )
-    }
-}
-
-// =============================================================================
 // MARK: - Ports
 // =============================================================================
 
 /// Mixed inbound + Clash API ports, each validated to 1–65535 and required to
-/// differ. Edits are committed on field commit / stepper change.
+/// differ. Edits are committed on field commit / stepper change. (Proxy-mode
+/// selection moved to the overview's 网络接管 cards.)
 private struct PortsSection: View {
     @EnvironmentObject private var appState: AppState
 
     @State private var mixedPort = AppPreferences.default.mixedPort
     @State private var clashAPIPort = AppPreferences.default.clashAPIPort
 
-    private var portsConflict: Bool { mixedPort == clashAPIPort }
+    /// The mixed (HTTP/SOCKS) inbound only exists in system-proxy mode; TUN mode
+    /// has no such listener, so its port is hidden there. The Clash API port is
+    /// used in both modes (dashboard stats + control), so it always shows.
+    private var showsMixedPort: Bool { appState.preferences.proxyMode == .systemProxy }
+
+    private var portsConflict: Bool { showsMixedPort && mixedPort == clashAPIPort }
 
     var body: some View {
         Section {
-            PortField(
-                title: "混合端口",
-                help: "本地 HTTP / SOCKS 混合入站端口",
-                symbolName: "arrow.left.arrow.right",
-                value: $mixedPort,
-                onCommit: commit
-            )
+            if showsMixedPort {
+                PortField(
+                    title: "混合端口",
+                    help: "本地 HTTP / SOCKS 混合入站端口",
+                    symbolName: "arrow.left.arrow.right",
+                    value: $mixedPort,
+                    onCommit: commit
+                )
+            }
             PortField(
                 title: "Clash API 端口",
                 help: "本地 Clash 兼容控制接口端口",
@@ -255,7 +187,7 @@ private struct PortsSection: View {
         } header: {
             Text("端口")
         } footer: {
-            Text("修改端口会在系统代理开启时自动重启核心。")
+            Text("修改端口会在代理开启时自动重启核心。")
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Color.secondaryLabel)
         }
@@ -337,123 +269,6 @@ private struct PortField: View {
 }
 
 // =============================================================================
-// MARK: - Core
-// =============================================================================
-
-/// sing-box binary: an override path with a file picker, plus a live discovery
-/// status line that reflects what `AppState.locateSingBoxBinary()` resolves.
-private struct CoreSection: View {
-    @EnvironmentObject private var appState: AppState
-
-    @State private var overridePath = ""
-
-    private var resolvedBinary: URL? { appState.locateSingBoxBinary() }
-
-    var body: some View {
-        Section {
-            LabeledContent {
-                HStack(spacing: Theme.Spacing.xs) {
-                    TextField("自动发现", text: $overridePath)
-                        .textFieldStyle(.roundedBorder)
-                        .font(Theme.Font.monoSmall)
-                        .frame(minWidth: 180)
-                        .onSubmit(commit)
-                    Button("选择…", action: chooseBinary)
-                    if !overridePath.isEmpty {
-                        Button {
-                            overridePath = ""
-                            commit()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(Theme.Color.tertiaryLabel)
-                        .help("清除并恢复自动发现")
-                    }
-                }
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("sing-box 路径")
-                        Text("留空则自动查找核心")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.secondaryLabel)
-                    }
-                } icon: {
-                    Image(systemName: "cpu")
-                        .foregroundStyle(Theme.Color.accent)
-                }
-            }
-
-            discoveryStatus
-        } header: {
-            Text("内核")
-        } footer: {
-            Text("可运行 scripts/fetch-singbox.sh 或执行 brew install sing-box 安装核心。")
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.Color.secondaryLabel)
-        }
-        .onAppear { overridePath = appState.preferences.singBoxBinaryPathOverride ?? "" }
-    }
-
-    @ViewBuilder
-    private var discoveryStatus: some View {
-        if let binary = resolvedBinary {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("已找到核心")
-                        .foregroundStyle(Theme.Color.label)
-                    Text(binary.path)
-                        .font(Theme.Font.monoSmall)
-                        .foregroundStyle(Theme.Color.secondaryLabel)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                }
-            } icon: {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(Theme.Color.active)
-            }
-        } else {
-            Label {
-                Text("未找到 sing-box，请指定路径或安装核心后重试。")
-                    .foregroundStyle(Theme.Color.secondaryLabel)
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.Color.warning)
-            }
-        }
-    }
-
-    private func chooseBinary() {
-        let panel = NSOpenPanel()
-        panel.title = "选择 sing-box 可执行文件"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.treatsFilePackagesAsDirectories = true
-        if !overridePath.isEmpty {
-            panel.directoryURL = URL(fileURLWithPath: (overridePath as NSString).expandingTildeInPath)
-                .deletingLastPathComponent()
-        }
-        if panel.runModal() == .OK, let url = panel.url {
-            overridePath = url.path
-            commit()
-        }
-    }
-
-    private func commit() {
-        let trimmed = overridePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let newValue: String? = trimmed.isEmpty ? nil : trimmed
-        guard appState.preferences.singBoxBinaryPathOverride != newValue else { return }
-        var preferences = appState.preferences
-        preferences.singBoxBinaryPathOverride = newValue
-        Task { await appState.updatePreferences(preferences) }
-    }
-}
-
-// =============================================================================
 // MARK: - Delay test
 // =============================================================================
 
@@ -500,17 +315,60 @@ private struct DelayTestSection: View {
 }
 
 // =============================================================================
-// MARK: - About
+// MARK: - Software update
 // =============================================================================
 
-/// App identity, license, upstream attribution, and the Sparkle update controls
-/// ("检查更新…" + an automatic-check toggle). Updates are delivered through
-/// Sparkle 2; runtime requires a signed release + hosted appcast (docs/RELEASE.md).
-private struct AboutSection: View {
+/// Sparkle update controls: a manual "检查更新…" trigger (disabled while a check
+/// is already running) and the automatic-check toggle.
+private struct UpdateSection: View {
     @ObservedObject private var updater = UpdaterController.shared
 
     @State private var autoCheck = UpdaterController.shared.automaticallyChecksForUpdates
 
+    var body: some View {
+        Section {
+            LabeledContent {
+                Button("检查更新…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.canCheckForUpdates)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("软件更新")
+                        Text("从官方源获取最新版本")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.secondaryLabel)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(Theme.Color.accent)
+                }
+            }
+
+            Toggle(isOn: $autoCheck) {
+                Label {
+                    Text("自动检查更新")
+                } icon: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(Theme.Color.accent)
+                }
+            }
+            .onChange(of: autoCheck) { _, newValue in
+                updater.automaticallyChecksForUpdates = newValue
+            }
+        } header: {
+            Text("升级")
+        }
+    }
+}
+
+// =============================================================================
+// MARK: - About
+// =============================================================================
+
+/// App identity: name + version.
+private struct AboutSection: View {
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -523,81 +381,14 @@ private struct AboutSection: View {
 
     var body: some View {
         Section {
-            LabeledContent {
+            LabeledContent("版本") {
                 Text(appVersion)
                     .font(Theme.Font.mono)
                     .foregroundStyle(Theme.Color.secondaryLabel)
                     .textSelection(.enabled)
-            } label: {
-                Label("Linko", systemImage: "bolt.horizontal.circle.fill")
-                    .tint(Theme.Color.accent)
             }
-
-            LabeledContent {
-                Text("GPL-3.0")
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Color.secondaryLabel)
-            } label: {
-                Label("开源许可", systemImage: "doc.text")
-                    .tint(Theme.Color.accent)
-            }
-
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("基于 sing-box 核心")
-                        .foregroundStyle(Theme.Color.label)
-                    Text("感谢 SagerNet/sing-box 提供的代理核心。")
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(Theme.Color.secondaryLabel)
-                }
-            } icon: {
-                Image(systemName: "shippingbox")
-                    .foregroundStyle(Theme.Color.accent)
-            }
-
-            updateControls
         } header: {
             Text("关于")
-        } footer: {
-            Text("更新通过 Sparkle 分发，需经开发者 EdDSA 签名后才会安装。")
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.Color.secondaryLabel)
-        }
-    }
-
-    /// Sparkle controls: a manual "检查更新…" trigger (disabled while a check is
-    /// already running) and the automatic-check toggle.
-    @ViewBuilder
-    private var updateControls: some View {
-        LabeledContent {
-            Button("检查更新…") {
-                updater.checkForUpdates()
-            }
-            .disabled(!updater.canCheckForUpdates)
-        } label: {
-            Label {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("软件更新")
-                    Text("从官方源获取最新版本")
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(Theme.Color.secondaryLabel)
-                }
-            } icon: {
-                Image(systemName: "arrow.down.circle")
-                    .foregroundStyle(Theme.Color.accent)
-            }
-        }
-
-        Toggle(isOn: $autoCheck) {
-            Label {
-                Text("自动检查更新")
-            } icon: {
-                Image(systemName: "clock.arrow.circlepath")
-                    .foregroundStyle(Theme.Color.accent)
-            }
-        }
-        .onChange(of: autoCheck) { _, newValue in
-            updater.automaticallyChecksForUpdates = newValue
         }
     }
 }

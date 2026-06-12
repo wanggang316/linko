@@ -5,24 +5,17 @@ import SwiftUI
 // MARK: - NodesView
 // =============================================================================
 
-/// The 节点 (Nodes) browser: a native list of every node across all subscriptions
-/// in the active profile, grouped by protocol, with a protocol badge + endpoint
-/// per row and a `NodeDetailView` detail pane. This is where the protocol breadth
-/// added this milestone becomes legible — WireGuard endpoints and SSH outbounds
-/// appear alongside the existing protocols, each with their own glyph, and a
-/// click reveals their key fields (interface address / pinned keys / auth method)
-/// read-only.
+/// The 节点 (Nodes) browser: a native list of every node in the active profile —
+/// subscription nodes plus the user's hand-added manual nodes — grouped by
+/// protocol, with a protocol badge + endpoint per row and a `NodeDetailView`
+/// detail pane.
 ///
-/// Self-contained and window-ready: it reads `appState.allNodes` and selects the
-/// active node via `appState.preferences.selectedNodeID` (read-only here; node
-/// selection stays in the menu). A leading filter lets the user narrow to a
-/// single protocol when a subscription mixes many.
-///
-/// Build-agent wiring note: to surface this as a Dashboard sidebar entry, add a
-/// `case nodes` to `DashboardSection` (title "节点", included in
-/// `selfChromedSections` so `isRoutingSection` is `true`), list it in the "订阅"
-/// or a "节点" sidebar `Section`, and return `NodesView()` from
-/// `DashboardView.detail`. The view declares its own `.navigationTitle("节点")`.
+/// This is the management surface for nodes: a leading "+" mints a new manual
+/// node via `NodeEditorView`; manual nodes can be edited, deleted, and set as
+/// the active node; subscription nodes (overwritten on every refresh) stay
+/// read-only but can be cloned into an editable manual node ("复制为可编辑节点").
+/// Setting the active node here mirrors the menu — selection drives which node
+/// routes traffic via `appState.selectNode`.
 struct NodesView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -30,6 +23,22 @@ struct NodesView: View {
     @State private var filter: NodeProtocol?
     /// The node selected in the list (drives the detail pane).
     @State private var selection: UUID?
+    /// The presented editor sheet, if any.
+    @State private var editor: Editor?
+
+    /// Identifies which editor sheet is up: a fresh create, or an edit of an
+    /// existing manual node.
+    private enum Editor: Identifiable {
+        case create
+        case edit(ProxyNode)
+
+        var id: String {
+            switch self {
+            case .create: return "create"
+            case .edit(let node): return node.id.uuidString
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -42,6 +51,11 @@ struct NodesView: View {
         .navigationTitle("节点")
         .toolbar { toolbarContent }
         .frame(minWidth: 640, minHeight: 440)
+        .sheet(item: $editor) { editor in
+            NodeEditorView(node: editorNode(for: editor)) { saved in
+                handleSave(editor, node: saved)
+            }
+        }
     }
 
     // MARK: - Derived state
@@ -93,9 +107,11 @@ struct NodesView: View {
                     ForEach(group.nodes) { node in
                         NodeListRow(
                             node: node,
-                            isActive: node.id == appState.preferences.selectedNodeID
+                            isActive: node.id == appState.preferences.selectedNodeID,
+                            isManual: appState.isManualNode(node.id)
                         )
                         .tag(node.id)
+                        .contextMenu { rowMenu(for: node) }
                     }
                 } header: {
                     HStack(spacing: Theme.Spacing.xs) {
@@ -112,10 +128,53 @@ struct NodesView: View {
     @ViewBuilder
     private var detail: some View {
         if let node = selectedNode {
-            NodeDetailView(node: node)
+            VStack(spacing: 0) {
+                detailActionBar(for: node)
+                Divider()
+                NodeDetailView(node: node)
+            }
         } else {
             detailPlaceholder
         }
+    }
+
+    /// The action bar above a node's detail: set-active plus the edit/delete or
+    /// clone affordances appropriate to whether the node is manual.
+    private func detailActionBar(for node: ProxyNode) -> some View {
+        let isActive = node.id == appState.preferences.selectedNodeID
+        let isManual = appState.isManualNode(node.id)
+        return HStack(spacing: Theme.Spacing.sm) {
+            Button {
+                appState.selectNode(id: node.id)
+            } label: {
+                Label(isActive ? "当前节点" : "设为当前节点", systemImage: isActive ? "checkmark.circle.fill" : "circle")
+            }
+            .disabled(isActive)
+
+            Spacer(minLength: Theme.Spacing.xs)
+
+            if isManual {
+                Button {
+                    editor = .edit(node)
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    Task { await appState.removeManualNode(id: node.id) }
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                .tint(Theme.Color.error)
+            } else if NodeEditorView.supports(node.protocolType) {
+                Button {
+                    cloneToManual(node)
+                } label: {
+                    Label("复制为可编辑节点", systemImage: "doc.on.doc")
+                }
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .padding(Theme.Spacing.sm)
     }
 
     private var detailPlaceholder: some View {
@@ -126,7 +185,7 @@ struct NodesView: View {
             Text("选择一个节点查看详情")
                 .font(Theme.Font.body)
                 .foregroundStyle(Theme.Color.secondaryLabel)
-            Text("WireGuard 与 SSH 节点会显示其接口地址、固定密钥与认证方式。")
+            Text("点「+」可手动新增节点；订阅节点可复制为可编辑节点。")
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Color.tertiaryLabel)
                 .multilineTextAlignment(.center)
@@ -134,6 +193,24 @@ struct NodesView: View {
         }
         .padding(Theme.Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Row context menu
+
+    @ViewBuilder
+    private func rowMenu(for node: ProxyNode) -> some View {
+        let isActive = node.id == appState.preferences.selectedNodeID
+        Button("设为当前节点") { appState.selectNode(id: node.id) }
+            .disabled(isActive)
+        Divider()
+        if appState.isManualNode(node.id) {
+            Button("编辑…") { editor = .edit(node) }
+            Button("删除", role: .destructive) {
+                Task { await appState.removeManualNode(id: node.id) }
+            }
+        } else if NodeEditorView.supports(node.protocolType) {
+            Button("复制为可编辑节点") { cloneToManual(node) }
+        }
     }
 
     // MARK: - Empty state
@@ -147,12 +224,18 @@ struct NodesView: View {
                 Text("暂无节点")
                     .font(Theme.Font.sectionTitle)
                     .foregroundStyle(Theme.Color.label)
-                Text("从订阅导入节点后，将在此浏览全部协议的节点，\n包括 WireGuard 与 SSH。")
+                Text("从订阅导入，或点下方按钮手动新增一个节点。")
                     .font(Theme.Font.body)
                     .foregroundStyle(Theme.Color.secondaryLabel)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Button {
+                editor = .create
+            } label: {
+                Label("新增节点", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
         }
         .padding(Theme.Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -185,11 +268,69 @@ struct NodesView: View {
             }
             .help("按协议筛选节点")
         }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button {
+                    appState.openConfigFileInEditor()
+                } label: {
+                    Label("在编辑器中打开", systemImage: "square.and.pencil")
+                }
+                Button {
+                    appState.revealConfigFileInFinder()
+                } label: {
+                    Label("在访达中显示", systemImage: "folder")
+                }
+            } label: {
+                Label("配置原文件", systemImage: "curlybraces")
+            }
+            .help("查看 / 编辑当前生成的 sing-box 配置原文件（config.json，每次启动或改节点会自动重新生成）")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                editor = .create
+            } label: {
+                Label("新增节点", systemImage: "plus")
+            }
+            .help("手动新增节点")
+        }
     }
 
     private var filterLabel: String {
         guard let filter else { return "全部协议" }
         return ProtocolPresentation.title(filter)
+    }
+
+    // MARK: - Editor plumbing
+
+    /// The node an editor sheet edits: `nil` for a fresh create, the target for
+    /// an edit.
+    private func editorNode(for editor: Editor) -> ProxyNode? {
+        switch editor {
+        case .create: return nil
+        case .edit(let node):
+            // Re-read from state so the form reflects the latest persisted value.
+            return allNodes.first { $0.id == node.id } ?? node
+        }
+    }
+
+    private func handleSave(_ editor: Editor, node: ProxyNode) {
+        switch editor {
+        case .create:
+            appState.addManualNode(node)
+            selection = node.id
+        case .edit:
+            Task { await appState.updateManualNode(node) }
+        }
+    }
+
+    /// Clones a (read-only) subscription node into an editable manual copy, then
+    /// opens it in the editor so the user can adjust it right away.
+    private func cloneToManual(_ node: ProxyNode) {
+        guard let newID = appState.duplicateNodeToManual(id: node.id),
+              let copy = appState.allNodes.first(where: { $0.id == newID })
+        else { return }
+        selection = newID
+        editor = .edit(copy)
     }
 }
 
@@ -198,11 +339,12 @@ struct NodesView: View {
 // =============================================================================
 
 /// One node entry in the browser list: a leading protocol glyph, the name +
-/// endpoint, a trailing protocol badge, and a small "使用中" marker when this is
-/// the active profile's selected node.
+/// endpoint, a trailing "手动" tag for manual nodes, and a small "使用中" marker
+/// when this is the active profile's selected node.
 private struct NodeListRow: View {
     let node: ProxyNode
     let isActive: Bool
+    let isManual: Bool
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
@@ -225,6 +367,15 @@ private struct NodeListRow: View {
             }
 
             Spacer(minLength: Theme.Spacing.xs)
+
+            if isManual {
+                Text("手动")
+                    .font(Theme.Font.caption2.weight(.medium))
+                    .foregroundStyle(Theme.Color.secondaryLabel)
+                    .padding(.horizontal, Theme.Spacing.xs)
+                    .padding(.vertical, 2)
+                    .background(Theme.Color.hover, in: Capsule())
+            }
 
             if isActive {
                 Text("使用中")
