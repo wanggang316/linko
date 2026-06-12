@@ -15,7 +15,7 @@ struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                networkTakeoverSection
+                ProxyControlCard()
                 if let reason = coreFailureReason {
                     failureNotice(reason)
                 }
@@ -58,20 +58,6 @@ struct OverviewView: View {
                 }
                 Spacer(minLength: 0)
             }
-        }
-    }
-
-    // MARK: - Network takeover (proxy mode + start)
-
-    /// The primary control surface: pick the (mutually exclusive) proxy mode and
-    /// start/stop it. A single card — the two modes are one choice, not two
-    /// independent switches.
-    private var networkTakeoverSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text("网络接管")
-                .font(Theme.Font.caption.weight(.semibold))
-                .foregroundStyle(Theme.Color.accent)
-            ProxyControlCard()
         }
     }
 
@@ -238,34 +224,7 @@ private struct ProxyControlCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Picker("代理模式", selection: modeBinding) {
-                    ForEach(ProxyMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(appState.isSwitchingProxy)
-
-                HStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: symbolName)
-                        .font(.title3)
-                        .foregroundStyle(isActive ? Theme.Color.accent : Theme.Color.inactive)
-                        .frame(width: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(isActive ? "已启动" : "未启动")
-                            .font(Theme.Font.heading)
-                            .foregroundStyle(Theme.Color.label)
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Circle()
-                                .fill(isActive ? StatusKind.active.color : StatusKind.inactive.color)
-                                .frame(width: 8, height: 8)
-                            Text(statusText)
-                                .font(Theme.Font.caption)
-                                .foregroundStyle(Theme.Color.secondaryLabel)
-                        }
-                    }
-                    Spacer(minLength: Theme.Spacing.xs)
+                SectionHeader("网络接管", symbolName: "shield.lefthalf.filled") {
                     if appState.isSwitchingProxy {
                         ProgressView().controlSize(.small)
                     }
@@ -276,11 +235,23 @@ private struct ProxyControlCard: View {
                         .disabled(appState.isSwitchingProxy)
                 }
 
-                Text(modeDescription)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Color.secondaryLabel)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Picker("代理模式", selection: modeBinding) {
+                    ForEach(ProxyMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(appState.isSwitchingProxy)
+
+                HStack(spacing: Theme.Spacing.xs) {
+                    Circle()
+                        .fill(isActive ? StatusKind.active.color : StatusKind.inactive.color)
+                        .frame(width: 8, height: 8)
+                    Text(statusText)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.secondaryLabel)
+                }
             }
         }
     }
