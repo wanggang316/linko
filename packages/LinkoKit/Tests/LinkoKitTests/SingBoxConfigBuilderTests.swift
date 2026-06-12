@@ -268,24 +268,41 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         let config = try buildJSON(nodes: [sampleNode], preferences: tunPrefs())
 
         let dns = try XCTUnwrap(config["dns"] as? [String: Any], "tun config must carry a dns block")
+        // IPv4-only: nodes are IPv4-only, AAAA records would send browsers down
+        // dead IPv6 paths (Happy Eyeballs -> ERR_CONNECTION_CLOSED).
+        XCTAssertEqual(dns["strategy"] as? String, "ipv4_only")
         let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+
+        // Direct bootstrap resolver: no detour (a bare direct detour is fatal
+        // in sing-box 1.13), used to resolve the node's own domain.
         let fallback = try XCTUnwrap(servers.first { ($0["tag"] as? String) == SingBoxConfigBuilder.tunFallbackDNSTag })
         XCTAssertEqual(fallback["type"] as? String, "udp")
-        XCTAssertEqual(fallback["detour"] as? String, "direct")
+        XCTAssertNil(fallback["detour"])
 
+        // Remote resolver reached through the proxy so answers aren't poisoned;
+        // it is the default for client queries.
+        let remote = try XCTUnwrap(servers.first { ($0["tag"] as? String) == SingBoxConfigBuilder.tunRemoteDNSTag })
+        XCTAssertEqual(remote["type"] as? String, "tcp")
+        XCTAssertEqual(remote["detour"] as? String, "proxy")
+        XCTAssertEqual(dns["final"] as? String, SingBoxConfigBuilder.tunRemoteDNSTag)
+
+        // Outbound server domains are bootstrapped by the direct resolver.
         let route = try XCTUnwrap(config["route"] as? [String: Any])
         let resolver = try XCTUnwrap(route["default_domain_resolver"] as? [String: Any])
         XCTAssertEqual(resolver["server"] as? String, SingBoxConfigBuilder.tunFallbackDNSTag)
+        XCTAssertEqual(resolver["strategy"] as? String, "ipv4_only")
     }
 
     func testTunModePrefixesSniffAndHijackRules() throws {
         let config = try buildJSON(nodes: [sampleNode], preferences: tunPrefs())
         let route = try XCTUnwrap(config["route"] as? [String: Any])
         let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
-        XCTAssertGreaterThanOrEqual(rules.count, 2)
+        XCTAssertGreaterThanOrEqual(rules.count, 3)
         XCTAssertEqual(rules[0]["action"] as? String, "sniff")
         XCTAssertEqual(rules[1]["action"] as? String, "hijack-dns")
         XCTAssertEqual(rules[1]["protocol"] as? String, "dns")
+        XCTAssertEqual(rules[2]["action"] as? String, "reject")
+        XCTAssertEqual(rules[2]["protocol"] as? String, "quic")
     }
 
     func testTunModeKeepsUserDNSWhenEnabled() throws {

@@ -181,8 +181,11 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
     // MARK: - TUN DNS guarantees
 
-    /// Tag of the DNS server synthesized when the user has DNS management off.
+    /// Tags of the DNS servers synthesized when the user has DNS management off.
+    /// `tunFallbackDNSTag` is the direct bootstrap resolver (node domains);
+    /// `tunRemoteDNSTag` is the proxied resolver for client queries.
     static let tunFallbackDNSTag = "tun-fallback-dns"
+    static let tunRemoteDNSTag = "tun-remote-dns"
 
     /// TUN mode cannot function without DNS: `auto_route` + `strict_route`
     /// pull every packet — including the system resolver's own queries — into
@@ -201,24 +204,45 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
         var route = (config["route"] as? [String: Any]) ?? [:]
 
         if config["dns"] == nil {
-            config["dns"] = [
-                "servers": [
-                    [
-                        "tag": Self.tunFallbackDNSTag,
-                        "type": "udp",
-                        "server": "223.5.5.5",
-                        // Resolver traffic must never route back into the
-                        // proxy (whose server domain it is busy resolving).
-                        "detour": "direct",
-                    ] as [String: Any]
-                ]
+            // TUN needs DNS, and a bare domestic resolver (223.5.5.5) hands back
+            // DNS-poisoned answers for blocked domains — so sites resolve to
+            // dead IPs and never load even though the node itself is reachable.
+            // Split it:
+            //   - a REMOTE resolver reached THROUGH the proxy, so its answers
+            //     can't be poisoned, handles client queries;
+            //   - a DIRECT resolver bootstraps the proxy's own server domain.
+            // The remote one is TCP so it works over any node's stream relay.
+            // No `detour: direct` anywhere — sing-box 1.13 rejects it as fatal.
+            let finalOutbound = (route["final"] as? String) ?? "proxy"
+            var servers: [[String: Any]] = [
+                ["tag": Self.tunFallbackDNSTag, "type": "udp", "server": "223.5.5.5"],
             ]
-            route["default_domain_resolver"] = ["server": Self.tunFallbackDNSTag]
+            // strategy ipv4_only (global): the nodes are IPv4-only, so returning
+            // AAAA records just sends browsers down dead IPv6 paths. Typed DNS
+            // servers reject a per-server `strategy`, so it lives on the dns
+            // block + the resolver.
+            var dns: [String: Any] = ["final": Self.tunFallbackDNSTag, "strategy": "ipv4_only"]
+            if finalOutbound != "direct" {
+                servers.insert(
+                    ["tag": Self.tunRemoteDNSTag, "type": "tcp", "server": "8.8.8.8", "detour": finalOutbound],
+                    at: 0
+                )
+                dns["final"] = Self.tunRemoteDNSTag
+            }
+            dns["servers"] = servers
+            config["dns"] = dns
+            route["default_domain_resolver"] = ["server": Self.tunFallbackDNSTag, "strategy": "ipv4_only"]
         }
 
         var rules = (route["rules"] as? [[String: Any]]) ?? []
         let hasHijack = rules.contains { ($0["action"] as? String) == "hijack-dns" }
         if !hasHijack {
+            // Reject QUIC so browsers fall back to TCP/HTTP2. QUIC-over-proxy is
+            // unreliable (UDP relay through the node), and Chrome forces QUIC
+            // for its own services — youtube/google hang in Chrome while Safari
+            // (TCP) works. Sits after sniff (which detects the quic protocol)
+            // and before any user rules so QUIC is dropped early.
+            rules.insert(["protocol": "quic", "action": "reject"], at: 0)
             rules.insert(["protocol": "dns", "action": "hijack-dns"], at: 0)
             rules.insert(["action": "sniff"], at: 0)
             route["rules"] = rules
@@ -241,14 +265,22 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
                 "listen_port": preferences.mixedPort,
             ]
         case .tun:
-            // address/auto_route per sing-box 1.12+ (unified `address` array).
-            // The NetworkExtension supplies the tun fd via libbox; gVisor is the
-            // portable userspace stack. fake-ip DNS (when enabled) pairs here.
+            // IPv4-only TUN. The proxy nodes are IPv4-only, so advertising an
+            // IPv6 tun address makes the OS route IPv6 into the tunnel; Chrome's
+            // Happy Eyeballs then races IPv6 for every connection, those die at
+            // the IPv4-only node, and gVisor turns the failed outbound into a
+            // TCP RST -> ERR_CONNECTION_CLOSED (browsers' subresource floods
+            // collapse; sing-box #2802). Dropping the IPv6 address keeps all
+            // traffic on the working IPv4 path. DNS is also forced ipv4_only.
+            //
+            // gVisor stack is deliberate (the system stack breaks WebKit/Chrome
+            // on macOS, #2741). MTU 1400 leaves room for the shadowsocks
+            // encapsulation overhead (1500 still clipped large transfers).
             return [
                 "type": "tun",
                 "tag": "tun-in",
-                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-                "mtu": 9000,
+                "address": ["172.19.0.1/30"],
+                "mtu": 1400,
                 "auto_route": true,
                 "strict_route": true,
                 "stack": "gvisor",
