@@ -63,17 +63,15 @@ struct OverviewView: View {
 
     // MARK: - Network takeover (proxy mode + start)
 
-    /// The primary control surface: one card per (mutually exclusive) proxy mode,
-    /// each with a switch that turns that mode on — the overview's start button.
+    /// The primary control surface: pick the (mutually exclusive) proxy mode and
+    /// start/stop it. A single card — the two modes are one choice, not two
+    /// independent switches.
     private var networkTakeoverSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("网络接管")
                 .font(Theme.Font.caption.weight(.semibold))
                 .foregroundStyle(Theme.Color.accent)
-            LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
-                ModeCard(mode: .systemProxy)
-                ModeCard(mode: .tun)
-            }
+            ProxyControlCard()
         }
     }
 
@@ -225,76 +223,82 @@ struct OverviewView: View {
 }
 
 // =============================================================================
-// MARK: - ModeCard
+// MARK: - ProxyControlCard
 // =============================================================================
 
-/// A proxy-mode card with a switch that turns that mode on. The two modes are
-/// mutually exclusive, so a card reads "on" only when it is *both* the active
-/// mode and actually running; flipping one on migrates off the other.
-private struct ModeCard: View {
+/// The proxy control: a segmented picker for the (mutually exclusive) mode and
+/// a switch that starts/stops it. Switching mode while running migrates the live
+/// connection; the switch reflects whichever mode is active.
+private struct ProxyControlCard: View {
     @EnvironmentObject private var appState: AppState
 
-    let mode: ProxyMode
-
-    /// This card's mode is the selected one *and* traffic is flowing.
-    private var isOn: Bool {
-        appState.preferences.proxyMode == mode && appState.isProxyActive
-    }
+    private var mode: ProxyMode { appState.preferences.proxyMode }
+    private var isActive: Bool { appState.isProxyActive }
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                Picker("代理模式", selection: modeBinding) {
+                    ForEach(ProxyMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(appState.isSwitchingProxy)
+
                 HStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: symbolName)
                         .font(.title3)
-                        .foregroundStyle(Theme.Color.accent)
-                        .frame(width: 24)
-                    Text(mode.displayName)
-                        .font(Theme.Font.heading)
-                        .foregroundStyle(Theme.Color.label)
+                        .foregroundStyle(isActive ? Theme.Color.accent : Theme.Color.inactive)
+                        .frame(width: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isActive ? "已启动" : "未启动")
+                            .font(Theme.Font.heading)
+                            .foregroundStyle(Theme.Color.label)
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Circle()
+                                .fill(isActive ? StatusKind.active.color : StatusKind.inactive.color)
+                                .frame(width: 8, height: 8)
+                            Text(statusText)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.secondaryLabel)
+                        }
+                    }
                     Spacer(minLength: Theme.Spacing.xs)
                     if appState.isSwitchingProxy {
                         ProgressView().controlSize(.small)
                     }
-                    Toggle("", isOn: binding)
+                    Toggle("", isOn: startBinding)
                         .toggleStyle(.switch)
                         .labelsHidden()
                         .tint(Theme.Color.accent)
                         .disabled(appState.isSwitchingProxy)
                 }
-                Text(description)
+
+                Text(modeDescription)
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Color.secondaryLabel)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                statusLine
             }
         }
     }
 
-    private var statusLine: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            Circle()
-                .fill(isOn ? StatusKind.active.color : StatusKind.inactive.color)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(Theme.Font.caption)
-                .foregroundStyle(isOn ? Theme.Color.label : Theme.Color.tertiaryLabel)
-        }
-    }
-
-    private var binding: Binding<Bool> {
+    /// Switching the mode migrates the live connection when active (see
+    /// `AppState.setProxyMode`).
+    private var modeBinding: Binding<ProxyMode> {
         Binding(
-            get: { isOn },
-            set: { enabled in
-                Task {
-                    if enabled {
-                        await appState.activateMode(mode)
-                    } else {
-                        await appState.setSystemProxy(enabled: false)
-                    }
-                }
-            }
+            get: { mode },
+            set: { newMode in Task { await appState.setProxyMode(newMode) } }
+        )
+    }
+
+    /// Starts / stops the selected mode.
+    private var startBinding: Binding<Bool> {
+        Binding(
+            get: { isActive },
+            set: { enabled in Task { await appState.setSystemProxy(enabled: enabled) } }
         )
     }
 
@@ -305,7 +309,7 @@ private struct ModeCard: View {
         }
     }
 
-    private var description: String {
+    private var modeDescription: String {
         switch mode {
         case .systemProxy: return "仅接管遵循系统代理设置的应用，兼容性最好。"
         case .tun: return "虚拟网卡接管全部流量，覆盖不遵循系统代理的应用。"
@@ -313,7 +317,7 @@ private struct ModeCard: View {
     }
 
     private var statusText: String {
-        guard isOn else { return "未启用" }
+        guard isActive else { return "未启用" }
         switch mode {
         case .systemProxy: return "已接管系统网络"
         case .tun: return "已接管全部流量 · \(appState.tunnelStatus.linkoLabel)"
