@@ -301,6 +301,20 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Switches to `mode` (if needed) and ensures the proxy is running — the
+    /// "turn this mode on" action behind the overview's mode cards. Switching
+    /// while already active migrates the live connection; otherwise it just
+    /// selects the mode and starts it. The two modes are mutually exclusive, so
+    /// turning one on leaves the other off.
+    func activateMode(_ mode: ProxyMode) async {
+        if preferences.proxyMode != mode {
+            await setProxyMode(mode)
+        }
+        if !isProxyActive {
+            await setSystemProxy(enabled: true)
+        }
+    }
+
     // MARK: - Proxy mode switching
 
     /// Switches the proxy interception mode. If a tunnel/proxy is currently

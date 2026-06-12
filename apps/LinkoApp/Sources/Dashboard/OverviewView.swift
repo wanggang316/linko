@@ -15,6 +15,7 @@ struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                networkTakeoverSection
                 statusGrid
                 if appState.isCoreRunning {
                     liveThroughput
@@ -26,6 +27,22 @@ struct OverviewView: View {
             .padding(Theme.Spacing.lg)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    // MARK: - Network takeover (proxy mode + start)
+
+    /// The primary control surface: one card per (mutually exclusive) proxy mode,
+    /// each with a switch that turns that mode on — the overview's start button.
+    private var networkTakeoverSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("网络接管")
+                .font(Theme.Font.caption.weight(.semibold))
+                .foregroundStyle(Theme.Color.accent)
+            LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
+                ModeCard(mode: .systemProxy)
+                ModeCard(mode: .tun)
+            }
+        }
     }
 
     // MARK: - Stopped notice
@@ -70,34 +87,6 @@ struct OverviewView: View {
                 kind: appState.selectedNode == nil ? .inactive : .active,
                 primary: appState.selectedNode?.name ?? "未选择",
                 secondary: nodeDetail
-            )
-            // The third card tracks the *active* mode only — the two modes are
-            // mutually exclusive, so TUN must never surface system-proxy state
-            // (and vice versa).
-            proxyStatusCard
-        }
-    }
-
-    /// The interception-status card for whichever mode is active: system-proxy
-    /// on/off + mixed port, or the TUN takeover + tunnel status.
-    @ViewBuilder
-    private var proxyStatusCard: some View {
-        switch appState.preferences.proxyMode {
-        case .systemProxy:
-            statusCard(
-                title: "系统代理",
-                symbolName: "network",
-                kind: appState.isSystemProxyEnabled ? .active : .inactive,
-                primary: appState.isSystemProxyEnabled ? "已开启" : "已关闭",
-                secondary: "混合端口 \(appState.preferences.mixedPort)"
-            )
-        case .tun:
-            statusCard(
-                title: "TUN 全局",
-                symbolName: "point.3.filled.connected.trianglepath.dotted",
-                kind: appState.isProxyActive ? .active : .inactive,
-                primary: appState.isProxyActive ? "已接管" : "未启用",
-                secondary: "虚拟网卡 · \(appState.tunnelStatus.linkoLabel)"
             )
         }
     }
@@ -231,5 +220,102 @@ struct OverviewView: View {
     private var nodeDetail: String {
         guard let node = appState.selectedNode else { return "请先导入订阅" }
         return "\(node.protocolType.rawValue.uppercased()) · \(node.server):\(node.port)"
+    }
+}
+
+// =============================================================================
+// MARK: - ModeCard
+// =============================================================================
+
+/// A proxy-mode card with a switch that turns that mode on. The two modes are
+/// mutually exclusive, so a card reads "on" only when it is *both* the active
+/// mode and actually running; flipping one on migrates off the other.
+private struct ModeCard: View {
+    @EnvironmentObject private var appState: AppState
+
+    let mode: ProxyMode
+
+    /// This card's mode is the selected one *and* traffic is flowing.
+    private var isOn: Bool {
+        appState.preferences.proxyMode == mode && appState.isProxyActive
+    }
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: symbolName)
+                        .font(.title3)
+                        .foregroundStyle(Theme.Color.accent)
+                        .frame(width: 24)
+                    Text(mode.displayName)
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(Theme.Color.label)
+                    Spacer(minLength: Theme.Spacing.xs)
+                    if appState.isSwitchingProxy {
+                        ProgressView().controlSize(.small)
+                    }
+                    Toggle("", isOn: binding)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .tint(Theme.Color.accent)
+                        .disabled(appState.isSwitchingProxy)
+                }
+                Text(description)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                statusLine
+            }
+        }
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Circle()
+                .fill(isOn ? StatusKind.active.color : StatusKind.inactive.color)
+                .frame(width: 8, height: 8)
+            Text(statusText)
+                .font(Theme.Font.caption)
+                .foregroundStyle(isOn ? Theme.Color.label : Theme.Color.tertiaryLabel)
+        }
+    }
+
+    private var binding: Binding<Bool> {
+        Binding(
+            get: { isOn },
+            set: { enabled in
+                Task {
+                    if enabled {
+                        await appState.activateMode(mode)
+                    } else {
+                        await appState.setSystemProxy(enabled: false)
+                    }
+                }
+            }
+        )
+    }
+
+    private var symbolName: String {
+        switch mode {
+        case .systemProxy: return "network"
+        case .tun: return "point.3.filled.connected.trianglepath.dotted"
+        }
+    }
+
+    private var description: String {
+        switch mode {
+        case .systemProxy: return "仅接管遵循系统代理设置的应用，兼容性最好。"
+        case .tun: return "虚拟网卡接管全部流量，覆盖不遵循系统代理的应用。"
+        }
+    }
+
+    private var statusText: String {
+        guard isOn else { return "未启用" }
+        switch mode {
+        case .systemProxy: return "已接管系统网络"
+        case .tun: return "已接管全部流量 · \(appState.tunnelStatus.linkoLabel)"
+        }
     }
 }
