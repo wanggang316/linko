@@ -224,34 +224,47 @@ private struct ProxyControlCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                SectionHeader("网络接管", symbolName: "shield.lefthalf.filled") {
-                    StatusPill(statusTitle, kind: statusKind)
-                }
-
-                Picker("代理模式", selection: modeBinding) {
-                    ForEach(ProxyMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(appState.isSwitchingProxy)
-
+                header
                 Divider().opacity(0.4)
-
                 LabeledContent {
-                    Toggle("", isOn: startBinding)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                        .tint(Theme.Color.accent)
-                        .disabled(appState.isSwitchingProxy)
+                    Picker("代理模式", selection: modeBinding) {
+                        ForEach(ProxyMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(appState.isSwitchingProxy)
                 } label: {
-                    Text("启动代理")
+                    Text("代理模式")
                         .font(Theme.Font.body)
                         .foregroundStyle(Theme.Color.label)
                 }
             }
+        }
+    }
+
+    /// Title + status pill on the left, the start switch pinned to the top-right.
+    private var header: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: "shield.lefthalf.filled")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.Color.accent)
+            Text("网络接管")
+                .font(Theme.Font.heading)
+                .foregroundStyle(Theme.Color.label)
+            StatusPill(statusTitle, kind: statusKind)
+            Spacer(minLength: Theme.Spacing.xs)
+            if appState.isSwitchingProxy {
+                ProgressView().controlSize(.small)
+            }
+            Toggle("", isOn: startBinding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .tint(Theme.Color.accent)
+                .disabled(appState.isSwitchingProxy)
         }
     }
 
