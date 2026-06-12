@@ -1,9 +1,10 @@
 import LinkoKit
 import SwiftUI
 
-/// Card-based window for importing a Clash YAML subscription. Accepts an
-/// http(s) URL or a local file path, shows import progress, and lists any
-/// parser warnings (skipped nodes) as a clean, icon-led result list.
+/// Card-based window for importing nodes. Accepts a subscription URL / local
+/// file (Clash YAML, a Base64 V2Ray subscription, or share links) or pasted
+/// node link(s); auto-detects the format, shows progress, and lists any parser
+/// warnings (skipped nodes) as a clean, icon-led result list.
 struct ImportSubscriptionView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -16,7 +17,7 @@ struct ImportSubscriptionView: View {
         case idle
         case importing
         case failed(String)
-        case finished(imported: Int, warnings: [String])
+        case finished(summary: String, warnings: [String])
     }
 
     var body: some View {
@@ -44,7 +45,7 @@ struct ImportSubscriptionView: View {
                 Text("导入订阅")
                     .font(Theme.Font.sectionTitle)
                     .foregroundStyle(Theme.Color.label)
-                Text("从 Clash 订阅链接或本地文件导入节点")
+                Text("粘贴订阅链接、节点链接或本地文件，自动识别格式")
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Color.secondaryLabel)
             }
@@ -56,19 +57,21 @@ struct ImportSubscriptionView: View {
     private var inputCard: some View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                SectionHeader("订阅来源", symbolName: "link")
+                SectionHeader("来源", symbolName: "link")
                 TextField(
                     "",
                     text: $sourceText,
-                    prompt: Text("https://example.com/sub  或  /路径/clash.yaml")
+                    prompt: Text("https://example.com/sub  ·  /路径/clash.yaml  ·  vmess://…"),
+                    axis: .vertical
                 )
                 .textFieldStyle(.roundedBorder)
                 .font(Theme.Font.mono)
+                .lineLimit(3...8)
                 .disabled(isImporting)
-                .onSubmit(startImport)
-                Text("支持 http(s) 链接与本地文件路径（YAML）。")
+                Text("支持 Clash 订阅、V2Ray（Base64）订阅、本地文件，以及粘贴 ss / vmess / vless / trojan / hysteria2 / tuic 节点链接（可多行）。链接会作为手动节点导入。")
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Color.tertiaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -85,7 +88,7 @@ struct ImportSubscriptionView: View {
                 HStack(spacing: Theme.Spacing.sm) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在下载并解析订阅…")
+                    Text("正在下载并解析…")
                         .font(Theme.Font.body)
                         .foregroundStyle(Theme.Color.secondaryLabel)
                 }
@@ -102,8 +105,8 @@ struct ImportSubscriptionView: View {
                         .foregroundStyle(Theme.Color.error)
                 }
             }
-        case .finished(let imported, let warnings):
-            ResultCard(imported: imported, warnings: warnings)
+        case .finished(let summary, let warnings):
+            ResultCard(summary: summary, warnings: warnings)
         }
     }
 
@@ -152,9 +155,8 @@ struct ImportSubscriptionView: View {
         phase = .importing
         Task {
             do {
-                let warnings = try await appState.importSubscription(urlString: trimmedSource)
-                let imported = appState.allNodes.count
-                phase = .finished(imported: imported, warnings: warnings)
+                let outcome = try await appState.importFromInput(trimmedSource)
+                phase = .finished(summary: outcome.summary, warnings: outcome.warnings)
             } catch {
                 let message = (error as? AppError)?.message ?? error.localizedDescription
                 phase = .failed(message)
@@ -170,16 +172,17 @@ struct ImportSubscriptionView: View {
 /// Successful-import summary: a green confirmation line plus, when present, a
 /// scrollable list of skipped-node warnings rendered icon-first.
 private struct ResultCard: View {
-    let imported: Int
+    let summary: String
     let warnings: [String]
 
     var body: some View {
         Card(material: .thinMaterial) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 Label {
-                    Text("导入成功，当前共 \(imported) 个节点。")
+                    Text(summary)
                         .font(Theme.Font.bodyEmphasized)
                         .foregroundStyle(Theme.Color.label)
+                        .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Theme.Color.active)

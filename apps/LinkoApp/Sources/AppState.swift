@@ -10,6 +10,31 @@ struct AppError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// Result of an import from the import sheet: what format was recognized, how
+/// many nodes were added, where they went (a refreshable subscription vs.
+/// manual nodes), and any per-entry parser warnings.
+struct NodeImportOutcome {
+    enum Target: Equatable {
+        case subscription(name: String)
+        case manualNodes
+    }
+
+    let format: SubscriptionFormat
+    let addedNodeCount: Int
+    let warnings: [String]
+    let target: Target
+
+    /// A one-line Chinese summary for the import sheet.
+    var summary: String {
+        switch target {
+        case .subscription(let name):
+            return "识别为\(format.displayName)，已导入订阅「\(name)」，共 \(addedNodeCount) 个节点。"
+        case .manualNodes:
+            return "识别为\(format.displayName)，已添加 \(addedNodeCount) 个手动节点。"
+        }
+    }
+}
+
 /// Central orchestrator for the menu bar app: owns preferences, imported
 /// subscriptions, the sing-box core lifecycle, the macOS system proxy state,
 /// and the Clash API interactions. All state is MainActor-bound.
@@ -845,9 +870,46 @@ final class AppState: ObservableObject {
 
     // MARK: - Subscriptions
 
-    /// Downloads and parses a Clash YAML subscription, persists the result,
-    /// and restarts the core if it is running. Returns parser warnings.
+    /// One-shot entry point for the import sheet: a fetchable subscription URL /
+    /// file path becomes a refreshable subscription, while pasted node link(s)
+    /// or raw config content (no URL to refresh) become manual nodes. Auto-
+    /// detects the format (Clash YAML / Base64 V2Ray subscription / share links)
+    /// and reports it so the UI can explain what it understood.
+    @discardableResult
+    func importFromInput(_ text: String) async throws -> NodeImportOutcome {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw AppError(message: "请输入订阅链接、节点链接或配置内容。")
+        }
+        if isFetchableSource(trimmed) {
+            return try await importSubscriptionDetailed(urlString: trimmed)
+        }
+        return try importPastedNodes(trimmed)
+    }
+
+    /// Whether `input` names a subscription we can fetch + refresh: an http(s)
+    /// URL or a local file path. Bare share links (`ss://…`, multi-line link
+    /// lists, Base64 blobs) are not fetchable and import as manual nodes instead.
+    private func isFetchableSource(_ input: String) -> Bool {
+        if input.hasPrefix("/") || input.hasPrefix("~") { return true }
+        if let url = URL(string: input), let scheme = url.scheme?.lowercased() {
+            return scheme == "http" || scheme == "https" || scheme == "file"
+        }
+        return false
+    }
+
+    /// Downloads and parses a subscription, persists the result, and restarts
+    /// the core if it is running. Returns parser warnings.
+    @discardableResult
     func importSubscription(urlString: String) async throws -> [String] {
+        try await importSubscriptionDetailed(urlString: urlString).warnings
+    }
+
+    /// The detailed import that backs both `importSubscription` and the import
+    /// sheet: fetches the URL / file, auto-detects the format, upserts a
+    /// subscription, and re-maps the selection. Returns the recognized format +
+    /// node count alongside warnings.
+    func importSubscriptionDetailed(urlString: String) async throws -> NodeImportOutcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         let url: URL
         if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
@@ -866,14 +928,14 @@ final class AppState: ObservableObject {
         } catch {
             throw AppError(message: "下载订阅失败：\(error.localizedDescription)")
         }
-        guard let yaml = String(data: data, encoding: .utf8) else {
+        guard let text = String(data: data, encoding: .utf8) else {
             throw AppError(message: "订阅内容不是合法的 UTF-8 文本。")
         }
         let result: SubscriptionParseResult
         do {
-            result = try subscriptionParser.parse(clashYAML: yaml)
+            result = try subscriptionParser.parse(subscription: text)
         } catch {
-            throw AppError(message: "订阅解析失败：不是合法的 Clash YAML。")
+            throw AppError(message: "订阅解析失败：无法识别为 Clash、V2Ray(Base64) 或节点链接格式。")
         }
         guard !result.nodes.isEmpty else {
             throw AppError(message: "订阅中没有可识别的节点。")
@@ -917,7 +979,45 @@ final class AppState: ObservableObject {
         if isProxyActive, importAffectsRunningConfig(updatedURL: url) {
             await reconfigureRunningProxy()
         }
-        return result.warnings
+        let finalName = subscriptions.first(where: { $0.url == url })?.name ?? subscription.name
+        return NodeImportOutcome(
+            format: result.format,
+            addedNodeCount: result.nodes.count,
+            warnings: result.warnings,
+            target: .subscription(name: finalName)
+        )
+    }
+
+    /// Imports pasted node link(s) / raw content (no fetchable URL) as manual
+    /// nodes. Auto-detects the format and reports it. Throws when nothing parses.
+    private func importPastedNodes(_ content: String) throws -> NodeImportOutcome {
+        let result: SubscriptionParseResult
+        do {
+            result = try subscriptionParser.parse(subscription: content)
+        } catch {
+            throw AppError(message: "无法识别：请粘贴 ss/vmess/vless/trojan/hysteria2/tuic 节点链接、V2Ray(Base64) 订阅，或 Clash 配置内容。")
+        }
+        guard !result.nodes.isEmpty else {
+            throw AppError(message: "没有可识别的节点。")
+        }
+        addManualNodes(result.nodes)
+        return NodeImportOutcome(
+            format: result.format,
+            addedNodeCount: result.nodes.count,
+            warnings: result.warnings,
+            target: .manualNodes
+        )
+    }
+
+    /// Appends several manual nodes in one persist, selecting the first when
+    /// nothing was selected yet (so a first paste becomes usable immediately).
+    private func addManualNodes(_ nodes: [ProxyNode]) {
+        guard !nodes.isEmpty else { return }
+        manualNodes.append(contentsOf: nodes)
+        persistManualNodes()
+        if preferences.selectedNodeID == nil, let first = nodes.first {
+            selectNode(id: first.id)
+        }
     }
 
     /// Whether re-importing the subscription at `updatedURL` changes the
