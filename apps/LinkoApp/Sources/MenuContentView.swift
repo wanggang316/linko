@@ -211,7 +211,7 @@ struct MenuContentView: View {
             if appState.allNodes.isEmpty {
                 emptyNodeState
             } else {
-                nodeList
+                nodeGroups
             }
         }
     }
@@ -234,27 +234,57 @@ struct MenuContentView: View {
         .padding(.vertical, Theme.Spacing.md)
     }
 
-    private var nodeList: some View {
-        ScrollView {
-            VStack(spacing: 1) {
-                ForEach(appState.allNodes) { node in
-                    NodeRow(
-                        node: node,
-                        isSelected: node.id == appState.preferences.selectedNodeID,
-                        delay: appState.nodeDelays[node.id]
-                    ) {
-                        appState.selectNode(id: node.id)
-                    }
-                }
+    /// One flyout `Menu` per node group — each subscription, then the manual
+    /// nodes — plus a row into the full node manager. This replaces the old
+    /// inline scroll list, which collapsed to zero height inside the
+    /// self-sizing `MenuBarExtra(.window)` panel: a `ScrollView` reports a
+    /// ~zero ideal height, and a `maxHeight` only caps it — it never forces the
+    /// list open, so the rows were present but invisible. Moving the node list
+    /// into a popup also keeps the panel itself compact.
+    private var nodeGroups: some View {
+        VStack(spacing: Theme.Spacing.xxs) {
+            ForEach(subscriptionGroups, id: \.id) { sub in
+                NodeGroupMenu(
+                    title: sub.name,
+                    symbolName: "rectangle.stack",
+                    nodes: sub.nodes,
+                    canTestDelays: isCoreRunning
+                )
             }
+            if !appState.manualNodes.isEmpty {
+                NodeGroupMenu(
+                    title: "手动节点",
+                    symbolName: "hand.point.up.left",
+                    nodes: appState.manualNodes,
+                    canTestDelays: isCoreRunning
+                )
+            }
+            manageNodesRow
         }
-        .frame(maxHeight: nodeListMaxHeight)
-        .scrollBounceBehavior(.basedOnSize)
     }
 
-    /// Caps the list around five rows; longer subscriptions scroll.
-    private var nodeListMaxHeight: CGFloat {
-        min(CGFloat(appState.allNodes.count) * 38, 200)
+    /// Subscriptions that actually carry nodes, in profile order.
+    private var subscriptionGroups: [LinkoKit.Subscription] {
+        appState.subscriptions.filter { !$0.nodes.isEmpty }
+    }
+
+    /// A subtle entry into the Dashboard's 节点 page for adding/editing nodes.
+    private var manageNodesRow: some View {
+        Button {
+            appState.openWindow(id: WindowID.dashboard, using: { openWindow(id: $0) })
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "slider.horizontal.3").font(.caption)
+                Text("管理节点…").font(Theme.Font.caption)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Theme.Color.secondaryLabel)
+            .padding(.horizontal, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(cornerRadius: Theme.Radius.small)
     }
 
     // MARK: - Footer
@@ -350,85 +380,96 @@ struct MenuContentView: View {
 }
 
 // =============================================================================
-// MARK: - Node row
+// MARK: - Node group menu
 // =============================================================================
 
-/// One selectable node entry: protocol glyph, name, server endpoint, latency
-/// badge, and a checkmark when selected. Hover-highlighted, tap to select.
-private struct NodeRow: View {
-    let node: ProxyNode
-    let isSelected: Bool
-    let delay: Int?
-    let onSelect: () -> Void
+/// One node group rendered as a Surge-style flyout: a compact panel row
+/// (group name + the node selected within it + a chevron) that opens a popup
+/// menu listing the group's nodes with a checkmark on the active one, each
+/// labeled with its latency, plus a "延迟测试" action. Selecting a node sets the
+/// active node for the whole profile (linko has a single `proxy` selector), so
+/// only the group that owns the active node shows a selection in its row.
+private struct NodeGroupMenu: View {
+    @EnvironmentObject private var appState: AppState
+
+    let title: String
+    let symbolName: String
+    let nodes: [ProxyNode]
+    /// Whether the Clash API is live, so a delay test can run.
+    let canTestDelays: Bool
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.body)
-                    .foregroundStyle(isSelected ? Theme.Color.accent : Theme.Color.tertiaryLabel)
-                    .frame(width: 18)
+        Menu {
+            Button {
+                appState.testDelays()
+            } label: {
+                Label("延迟测试", systemImage: "bolt")
+            }
+            .disabled(!canTestDelays)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(node.name)
-                        .font(Theme.Font.bodyEmphasized)
-                        .foregroundStyle(Theme.Color.label)
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(Theme.Font.caption2)
-                        .foregroundStyle(Theme.Color.tertiaryLabel)
-                        .lineLimit(1)
+            Divider()
+
+            // An inline Picker renders each node as a menu item with a native
+            // checkmark on the selected one; its binding drives node selection.
+            Picker("节点", selection: selectionBinding) {
+                ForEach(nodes) { node in
+                    Text(label(for: node)).tag(node.id as UUID?)
                 }
-
-                Spacer(minLength: Theme.Spacing.xs)
-                DelayBadge(delay: delay)
             }
-            .padding(.horizontal, Theme.Spacing.xs)
-            .padding(.vertical, Theme.Spacing.xs - 1)
-            .contentShape(Rectangle())
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            rowLabel
         }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                .fill(isSelected ? Theme.Color.accent.opacity(0.1) : Color.clear)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+    }
+
+    /// Reads the profile's selected node; writing selects the chosen node.
+    private var selectionBinding: Binding<UUID?> {
+        Binding(
+            get: { appState.preferences.selectedNodeID },
+            set: { if let id = $0 { appState.selectNode(id: id) } }
         )
-        .hoverHighlight()
     }
 
-    private var subtitle: String {
-        "\(node.protocolType.rawValue.uppercased()) · \(node.server):\(node.port)"
+    /// The node in this group that is currently active, if any.
+    private var currentNode: ProxyNode? {
+        nodes.first { $0.id == appState.preferences.selectedNodeID }
     }
-}
 
-/// A latency chip colored by quality: green (fast), orange (medium), red (slow),
-/// muted when untested.
-private struct DelayBadge: View {
-    let delay: Int?
-
-    var body: some View {
-        Group {
-            if let delay {
-                Text("\(delay) ms")
-                    .font(Theme.Font.monoSmall.weight(.medium))
-                    .foregroundStyle(tint(for: delay))
-                    .padding(.horizontal, Theme.Spacing.xs)
-                    .padding(.vertical, 2)
-                    .background(tint(for: delay).opacity(0.14), in: Capsule())
-            } else {
-                Text("—")
-                    .font(Theme.Font.monoSmall)
-                    .foregroundStyle(Theme.Color.tertiaryLabel)
-                    .padding(.horizontal, Theme.Spacing.xs)
-            }
+    private var rowLabel: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: symbolName)
+                .font(.body)
+                .foregroundStyle(Theme.Color.secondaryLabel)
+                .frame(width: 20, alignment: .center)
+            Text(title)
+                .font(Theme.Font.bodyEmphasized)
+                .foregroundStyle(Theme.Color.label)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: Theme.Spacing.xs)
+            Text(currentNode?.name ?? "未选择")
+                .font(Theme.Font.caption)
+                .foregroundStyle(currentNode != nil ? Theme.Color.accent : Theme.Color.tertiaryLabel)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Image(systemName: "chevron.right")
+                .font(Theme.Font.caption2)
+                .foregroundStyle(Theme.Color.tertiaryLabel)
         }
+        .padding(.horizontal, Theme.Spacing.xs)
+        .padding(.vertical, Theme.Spacing.xs - 1)
+        .contentShape(Rectangle())
     }
 
-    private func tint(for delay: Int) -> Color {
-        switch delay {
-        case ..<200: return Theme.Color.active
-        case ..<500: return Theme.Color.warning
-        default: return Theme.Color.error
+    /// A node's menu label: name, plus its measured latency when known.
+    private func label(for node: ProxyNode) -> String {
+        if let delay = appState.nodeDelays[node.id] {
+            return "\(node.name)   \(delay) ms"
         }
+        return node.name
     }
 }
 
