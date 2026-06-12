@@ -43,7 +43,7 @@ struct OverviewView: View {
                     Text("核心未运行")
                         .font(Theme.Font.heading)
                         .foregroundStyle(Theme.Color.secondaryLabel)
-                    Text("开启系统代理后，这里会显示实时速率与累计流量。")
+                    Text("开启代理后，这里会显示实时速率与累计流量。")
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Color.tertiaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
@@ -71,12 +71,33 @@ struct OverviewView: View {
                 primary: appState.selectedNode?.name ?? "未选择",
                 secondary: nodeDetail
             )
+            // The third card tracks the *active* mode only — the two modes are
+            // mutually exclusive, so TUN must never surface system-proxy state
+            // (and vice versa).
+            proxyStatusCard
+        }
+    }
+
+    /// The interception-status card for whichever mode is active: system-proxy
+    /// on/off + mixed port, or the TUN takeover + tunnel status.
+    @ViewBuilder
+    private var proxyStatusCard: some View {
+        switch appState.preferences.proxyMode {
+        case .systemProxy:
             statusCard(
                 title: "系统代理",
                 symbolName: "network",
                 kind: appState.isSystemProxyEnabled ? .active : .inactive,
                 primary: appState.isSystemProxyEnabled ? "已开启" : "已关闭",
                 secondary: "混合端口 \(appState.preferences.mixedPort)"
+            )
+        case .tun:
+            statusCard(
+                title: "TUN 全局",
+                symbolName: "point.3.filled.connected.trianglepath.dotted",
+                kind: appState.isProxyActive ? .active : .inactive,
+                primary: appState.isProxyActive ? "已接管" : "未启用",
+                secondary: "虚拟网卡 · \(appState.tunnelStatus.linkoLabel)"
             )
         }
     }
@@ -202,7 +223,7 @@ struct OverviewView: View {
     private var coreStatusDetail: String {
         switch appState.coreState {
         case .running(let pid): return "PID \(pid)"
-        case .stopped: return "开启系统代理以启动"
+        case .stopped: return "开启代理以启动"
         case .failed(let reason): return reason
         }
     }

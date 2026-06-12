@@ -173,22 +173,6 @@ private struct ModeSection: View {
             }
             .pickerStyle(.segmented)
             .disabled(appState.isSwitchingProxy)
-
-            if appState.preferences.proxyMode == .tun {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("TUN 为实验性功能")
-                            .foregroundStyle(Theme.Color.label)
-                        Text("系统扩展在 macOS 26 上的全新激活存在已知系统级问题，可能无法加载（报“Extension not found”）。日常请使用「系统代理」模式；TUN 在 macOS 15 等系统上可正常工作，首次启用需在「系统设置 › 通用 › 登录项与扩展 › 网络扩展」批准。")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.secondaryLabel)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } icon: {
-                    Image(systemName: "flask")
-                        .foregroundStyle(Theme.Color.warning)
-                }
-            }
         } header: {
             Text("代理模式")
         } footer: {
@@ -229,17 +213,24 @@ private struct PortsSection: View {
     @State private var mixedPort = AppPreferences.default.mixedPort
     @State private var clashAPIPort = AppPreferences.default.clashAPIPort
 
-    private var portsConflict: Bool { mixedPort == clashAPIPort }
+    /// The mixed (HTTP/SOCKS) inbound only exists in system-proxy mode; TUN mode
+    /// has no such listener, so its port is hidden there. The Clash API port is
+    /// used in both modes (dashboard stats + control), so it always shows.
+    private var showsMixedPort: Bool { appState.preferences.proxyMode == .systemProxy }
+
+    private var portsConflict: Bool { showsMixedPort && mixedPort == clashAPIPort }
 
     var body: some View {
         Section {
-            PortField(
-                title: "混合端口",
-                help: "本地 HTTP / SOCKS 混合入站端口",
-                symbolName: "arrow.left.arrow.right",
-                value: $mixedPort,
-                onCommit: commit
-            )
+            if showsMixedPort {
+                PortField(
+                    title: "混合端口",
+                    help: "本地 HTTP / SOCKS 混合入站端口",
+                    symbolName: "arrow.left.arrow.right",
+                    value: $mixedPort,
+                    onCommit: commit
+                )
+            }
             PortField(
                 title: "Clash API 端口",
                 help: "本地 Clash 兼容控制接口端口",
@@ -255,7 +246,7 @@ private struct PortsSection: View {
         } header: {
             Text("端口")
         } footer: {
-            Text("修改端口会在系统代理开启时自动重启核心。")
+            Text("修改端口会在代理开启时自动重启核心。")
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Color.secondaryLabel)
         }
