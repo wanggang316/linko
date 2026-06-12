@@ -387,8 +387,13 @@ private struct AboutSection: View {
                     .foregroundStyle(Theme.Color.secondaryLabel)
                     .textSelection(.enabled)
             } label: {
-                Label("Linko", systemImage: "bolt.horizontal.circle.fill")
-                    .tint(Theme.Color.accent)
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 22, height: 22)
+                    Text("Linko")
+                        .foregroundStyle(Theme.Color.label)
+                }
             }
         } header: {
             Text("关于")
