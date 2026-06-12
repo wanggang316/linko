@@ -47,6 +47,7 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
     }
 
     private func openTun0(_ options: LibboxTunOptionsProtocol?, ret0_: UnsafeMutablePointer<Int32>?) async throws {
+        tunnelLog.error("openTun: begin")
         guard let options, let ret0_ else {
             throw tunnelError("openTun called with nil options or return pointer")
         }
@@ -110,18 +111,23 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
 
         self.networkSettings = settings
         // Allocating the utun interface; the fd becomes readable afterwards.
+        tunnelLog.error("openTun: calling setTunnelNetworkSettings (defaultRoute=\(hasDefaultRoute, privacy: .public))")
         try await provider.setTunnelNetworkSettings(settings)
+        tunnelLog.error("openTun: setTunnelNetworkSettings returned")
 
         // Resolve the utun file descriptor. Prefer reading it straight off the
         // packet flow via KVC; fall back to libbox's own lookup.
         if let fd = provider.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 {
+            tunnelLog.error("openTun: got fd \(fd, privacy: .public) via packetFlow KVC")
             ret0_.pointee = fd
             return
         }
         let looped = LibboxGetTunnelFileDescriptor()
         if looped != -1 {
+            tunnelLog.error("openTun: got fd \(looped, privacy: .public) via LibboxGetTunnelFileDescriptor")
             ret0_.pointee = looped
         } else {
+            tunnelLog.error("openTun: NO fd available")
             throw tunnelError("Missing tunnel file descriptor")
         }
     }
@@ -224,10 +230,30 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
     }
 
     func autoDetectControl(_ fd: Int32) throws {
-        // No-op: NetworkExtension binds sockets to the physical interface for us.
+        // Bind every outbound socket libbox opens to the physical egress
+        // interface. Without this the box's own connection to the proxy server
+        // is recaptured by auto_route back into the tunnel and loops endlessly
+        // (dozens of [proxy] sessions to the node's own ip:port), starving real
+        // traffic. NE does NOT auto-protect these on macOS — we IP_BOUND_IF them.
+        guard let index = physicalInterfaceIndex() else { return }
+        var idx = index
+        let size = socklen_t(MemoryLayout<UInt32>.size)
+        _ = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &idx, size)
+        _ = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, size)
     }
 
-    func usePlatformAutoDetectControl() -> Bool { false }
+    func usePlatformAutoDetectControl() -> Bool { true }
+
+    /// Index of the default physical egress interface (e.g. en0). Outbound
+    /// sockets are bound to it so they bypass the tunnel utun.
+    private func physicalInterfaceIndex() -> UInt32? {
+        guard let path = interfaceMonitor?.currentPath else { return nil }
+        let physical = path.availableInterfaces.first {
+            !$0.name.hasPrefix("utun") && !$0.name.hasPrefix("lo") && !$0.name.hasPrefix("ipsec")
+        }
+        guard let iface = physical ?? path.availableInterfaces.first else { return nil }
+        return UInt32(iface.index)
+    }
 
     func useProcFS() -> Bool { false }
 
