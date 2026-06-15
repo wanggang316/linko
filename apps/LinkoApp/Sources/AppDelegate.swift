@@ -21,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppState.shared.recoverFromPreviousSession()
+        // Resume the previous session's proxy on/off state, so a relaunch
+        // (manual or at login) picks up where the user left off. Runs after
+        // recovery so a leftover system-proxy snapshot is cleared first.
+        Task { await AppState.shared.restorePreviousProxyState() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
