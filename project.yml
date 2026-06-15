@@ -11,8 +11,8 @@ settings:
     # app and its embedded system extension stay in lockstep. `make bump-version`
     # rewrites these two lines; the build number follows touch-code's
     # YYYYMMDDNNN scheme (8-digit date + 3-digit daily sequence).
-    MARKETING_VERSION: "0.1.4"
-    CURRENT_PROJECT_VERSION: "20260612001"
+    MARKETING_VERSION: "0.1.5"
+    CURRENT_PROJECT_VERSION: "20260615001"
 
 packages:
   LinkoKit:
