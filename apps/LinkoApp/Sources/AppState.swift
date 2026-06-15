@@ -10,6 +10,13 @@ struct AppError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// Persisted across launches so a relaunch resumes the previous proxy on/off
+/// state. Global (not per-profile): one proxy runs at a time and it follows
+/// the active profile, which is restored separately.
+private struct SessionState: Codable, Equatable {
+    var proxyActive: Bool
+}
+
 /// Result of an import from the import sheet: what format was recognized, how
 /// many nodes were added, where they went (a refreshable subscription vs.
 /// manual nodes), and any per-entry parser warnings.
@@ -130,6 +137,7 @@ final class AppState: ObservableObject {
     private var configFileURL: URL { supportDirectoryURL.appendingPathComponent("config.json") }
     private var logFileURL: URL { supportDirectoryURL.appendingPathComponent("core.log") }
     private var networkSwitchFileURL: URL { supportDirectoryURL.appendingPathComponent("network-switch.json") }
+    private var sessionStateFileURL: URL { supportDirectoryURL.appendingPathComponent("session-state.json") }
 
     // MARK: - Init
 
@@ -287,12 +295,24 @@ final class AppState: ObservableObject {
             // Re-check: a queued restart/toggle may have changed the state by
             // the time this operation runs.
             guard enabled != isProxyActive else { return }
-            switch preferences.proxyMode {
-            case .systemProxy:
-                if enabled { await startProxying() } else { stopProxying() }
-            case .tun:
-                if enabled { await startTunnel() } else { await stopTunnel() }
-            }
+            await applyProxy(enabled: enabled)
+        }
+        // Remember the user's resulting on/off choice so the next launch can
+        // resume it (see `restorePreviousProxyState`). Persist the actual
+        // outcome, not the request: a failed start leaves the proxy off, and
+        // we must not resume a state that never came up.
+        persistProxyActive(isProxyActive)
+    }
+
+    /// Brings the current `proxyMode` up or down. The shared core of the user
+    /// toggle and the launch-time state restore; callers own serialization
+    /// (via `runSerializedLifecycle`) and persistence.
+    private func applyProxy(enabled: Bool) async {
+        switch preferences.proxyMode {
+        case .systemProxy:
+            if enabled { await startProxying() } else { stopProxying() }
+        case .tun:
+            if enabled { await startTunnel() } else { await stopTunnel() }
         }
     }
 
@@ -623,6 +643,23 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Restores the proxy on/off state from the previous session, so a
+    /// relaunch — manual or at login — resumes where the user left off. If the
+    /// proxy was on, brings the *current* mode up (dispatched by `proxyMode`,
+    /// so it resumes whichever mode is selected); if it was off, does nothing.
+    ///
+    /// Deliberately does NOT re-persist the outcome: a transient boot-time
+    /// failure (network not up yet, binary momentarily missing) must not erase
+    /// the saved intent, so the next launch can still retry. Called once at
+    /// launch, after `recoverFromPreviousSession`.
+    func restorePreviousProxyState() async {
+        guard !isSwitchingProxy, !isProxyActive, loadPersistedProxyActive() else { return }
+        await runSerializedLifecycle { [self] in
+            guard !isProxyActive else { return }
+            await applyProxy(enabled: true)
+        }
+    }
+
     /// Called on app termination and from the quit menu item.
     func shutdown() {
         if isSystemProxyEnabled {
@@ -828,6 +865,24 @@ final class AppState: ObservableObject {
 
     private func persistNetworkSwitch() {
         persistJSON(networkSwitch, to: networkSwitchFileURL, what: "网络环境切换")
+    }
+
+    // MARK: - Session state (restore previous proxy on/off across launches)
+
+    /// Records whether the proxy is on, so the next launch can resume it.
+    private func persistProxyActive(_ active: Bool) {
+        persistJSON(SessionState(proxyActive: active), to: sessionStateFileURL, what: "会话状态")
+    }
+
+    /// Reads the previous session's proxy on/off intent; `false` on first run
+    /// or a corrupt/missing file (handled by `loadJSON`).
+    private func loadPersistedProxyActive() -> Bool {
+        var notices: [String] = []
+        let state = Self.loadJSON(
+            SessionState.self, from: sessionStateFileURL, what: "会话状态", notices: &notices
+        )
+        if !notices.isEmpty { lastErrorMessage = notices.joined(separator: "\n") }
+        return state?.proxyActive ?? false
     }
 
     // MARK: - Delay testing
