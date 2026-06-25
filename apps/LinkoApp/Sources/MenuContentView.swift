@@ -51,7 +51,7 @@ struct MenuContentView: View {
     // MARK: - Header
 
     private var header: some View {
-        Card(padding: Theme.Spacing.sm) {
+        Card(padding: Theme.Spacing.sm, material: .regularMaterial) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(spacing: Theme.Spacing.sm) {
                     VStack(alignment: .leading, spacing: 1) {
