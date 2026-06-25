@@ -54,9 +54,6 @@ struct MenuContentView: View {
         Card(padding: Theme.Spacing.sm) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: "bolt.horizontal.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(Theme.Color.accent)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("linko")
                             .font(Theme.Font.heading)
