@@ -308,12 +308,22 @@ struct MetricView: View {
     let caption: String
     var symbolName: String?
     var tint: Color = Theme.Color.label
+    /// The value's type ramp; smaller surfaces (e.g. the menu header) pass a
+    /// more compact font so two metrics share a row without crowding.
+    var valueFont: Font = Theme.Font.metric
 
-    init(value: String, caption: String, symbolName: String? = nil, tint: Color = Theme.Color.label) {
+    init(
+        value: String,
+        caption: String,
+        symbolName: String? = nil,
+        tint: Color = Theme.Color.label,
+        valueFont: Font = Theme.Font.metric
+    ) {
         self.value = value
         self.caption = caption
         self.symbolName = symbolName
         self.tint = tint
+        self.valueFont = valueFont
     }
 
     var body: some View {
@@ -325,8 +335,13 @@ struct MetricView: View {
                         .foregroundStyle(tint)
                 }
                 Text(value)
-                    .font(Theme.Font.metric)
+                    .font(valueFont)
                     .foregroundStyle(Theme.Color.label)
+                    // Shrink the number to fit its column rather than truncating
+                    // it to an "…" — a half-width rate slot can't always hold a
+                    // spelled-out "42 bytes/s".
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             Text(caption)
                 .font(Theme.Font.caption)

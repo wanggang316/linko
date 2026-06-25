@@ -71,20 +71,23 @@ struct MenuContentView: View {
 
                 Divider().opacity(0.5)
 
-                HStack(spacing: Theme.Spacing.lg) {
+                HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                     MetricView(
                         value: rateText(meter.downRate),
                         caption: "下载",
                         symbolName: "arrow.down",
-                        tint: Theme.Color.download
+                        tint: Theme.Color.download,
+                        valueFont: Theme.Font.metricSmall
                     )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     MetricView(
                         value: rateText(meter.upRate),
                         caption: "上传",
                         symbolName: "arrow.up",
-                        tint: Theme.Color.upload
+                        tint: Theme.Color.upload,
+                        valueFont: Theme.Font.metricSmall
                     )
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
