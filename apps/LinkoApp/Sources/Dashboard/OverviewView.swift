@@ -8,18 +8,20 @@ struct OverviewView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var viewModel: DashboardViewModel
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 240), spacing: Theme.Spacing.md)
-    ]
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                ProxyControlCard()
+                // The proxy control and the selected-node status share one row so
+                // the two top-level controls read as a single, tidy band.
+                HStack(alignment: .top, spacing: Theme.Spacing.md) {
+                    ProxyControlCard()
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    nodeStatusCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
                 if let reason = coreFailureReason {
                     failureNotice(reason)
                 }
-                statusGrid
                 if appState.isCoreRunning {
                     liveThroughput
                     totalsCard
@@ -86,18 +88,17 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - Status grid
+    // MARK: - Node status
 
-    private var statusGrid: some View {
-        LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
-            statusCard(
-                title: "当前节点",
-                symbolName: "antenna.radiowaves.left.and.right",
-                kind: appState.selectedNode == nil ? .inactive : .active,
-                primary: appState.selectedNode?.name ?? "未选择",
-                secondary: nodeDetail
-            )
-        }
+    /// The selected-node status card, shown beside the proxy control.
+    private var nodeStatusCard: some View {
+        statusCard(
+            title: "当前节点",
+            symbolName: "antenna.radiowaves.left.and.right",
+            kind: appState.selectedNode == nil ? .inactive : .active,
+            primary: appState.selectedNode?.name ?? "未选择",
+            secondary: nodeDetail
+        )
     }
 
     private func statusCard(
