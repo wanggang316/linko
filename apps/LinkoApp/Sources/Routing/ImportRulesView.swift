@@ -112,7 +112,7 @@ struct ImportRulesView: View {
     // MARK: - Input
 
     private var inputCard: some View {
-        Card {
+        Card(material: .regularMaterial) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 SectionHeader("粘贴规则文本", symbolName: "doc.plaintext")
                 TextEditor(text: $sourceText)

@@ -29,6 +29,11 @@ enum Theme {
 
         /// Hairline border for cards and chips, tuned to read on materials.
         static let cardBorder = SwiftUI.Color(nsColor: .separatorColor).opacity(0.7)
+        /// Opaque elevated surface for content cards sitting on the window
+        /// background — the native macOS "grouped content" look (System
+        /// Settings), instead of a translucent material that reads flat on an
+        /// opaque window.
+        static let cardFill = SwiftUI.Color(nsColor: .controlBackgroundColor)
         /// Hover/selection tint laid over rows and buttons.
         static let hover = SwiftUI.Color(nsColor: .quaternaryLabelColor).opacity(0.6)
 
@@ -270,18 +275,20 @@ struct StatusPill: View {
 /// A rounded container backed by a system material with a subtle hairline
 /// border. The native "surface" primitive — group related content in one of
 /// these rather than nesting boxes inside boxes.
-struct Card<Content: View>: View {
+struct Card<Content: View, Background: ShapeStyle>: View {
     var padding: CGFloat
-    var material: Material
+    var background: Background
     @ViewBuilder var content: () -> Content
 
+    /// Translucent variant: pass a `Material` (e.g. `.thinMaterial`) for cards
+    /// that layer inside a frosted sheet or popover.
     init(
         padding: CGFloat = Theme.Spacing.md,
-        material: Material = .regularMaterial,
+        material: Background,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.padding = padding
-        self.material = material
+        self.background = material
         self.content = content
     }
 
@@ -289,11 +296,22 @@ struct Card<Content: View>: View {
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(material, in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
+            .background(background, in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                     .strokeBorder(Theme.Color.cardBorder, lineWidth: 1)
             )
+    }
+}
+
+/// Default card surface: an opaque native fill that reads as elevated grouped
+/// content on the window background, rather than a translucent material slab.
+extension Card where Background == Color {
+    init(
+        padding: CGFloat = Theme.Spacing.md,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.init(padding: padding, material: Theme.Color.cardFill, content: content)
     }
 }
 

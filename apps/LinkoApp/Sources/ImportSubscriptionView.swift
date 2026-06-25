@@ -55,7 +55,7 @@ struct ImportSubscriptionView: View {
     // MARK: - Input
 
     private var inputCard: some View {
-        Card {
+        Card(material: .regularMaterial) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SectionHeader("来源", symbolName: "link")
                 TextField(
