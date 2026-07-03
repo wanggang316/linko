@@ -33,6 +33,9 @@ struct QuickAddRuleView: View {
         .onChange(of: appState.quickAddCapture) { _, newState in
             rebuildForm(for: newState)
         }
+        // Save, cancel, or the window's close control: drop the captured
+        // page URL so it never lingers in memory behind a closed window.
+        .onDisappear { appState.clearQuickAddCapture() }
     }
 
     // MARK: - Derived state
@@ -153,19 +156,37 @@ struct QuickAddRuleView: View {
     /// button — can never insert twice.
     private func save() {
         guard let rule = form?.commitRule() else { return }
-        var preferences = appState.preferences
-        preferences.routing.rules.insert(rule, at: 0)
-        let updated = preferences
-        Task { await appState.updatePreferences(updated) }
+        // Snapshot the preferences inside the task: `updatePreferences` has
+        // no suspension between reading and writing `preferences`, so a
+        // snapshot taken in the same main-actor turn as the update can never
+        // build on a state another turn has since replaced (the lost-update
+        // window a synchronous snapshot would leave open).
+        Task {
+            var preferences = appState.preferences
+            preferences.routing.rules.insert(rule, at: 0)
+            await appState.updatePreferences(preferences)
+        }
         dismiss()
     }
 
     // MARK: - Helpers
 
-    /// The captured page reduced to its host for display; falls back to the
-    /// raw string when it carries no parseable host (shown, never logged).
-    private static func displayHost(from urlString: String) -> String {
-        URL(string: urlString)?.host ?? urlString
+    /// The captured page reduced to its host for display, through the same
+    /// parser the form itself uses — `URL(string:)` disagrees with
+    /// `DomainCandidateParser` on unsupported schemes and adversarial
+    /// authorities, and the header must never contradict the candidates
+    /// below it. A domain capture shows the full hostname, an IP capture the
+    /// CIDR literal; input the parser rejects falls back to the raw string
+    /// (shown, never logged). Internal for unit tests.
+    static func displayHost(from urlString: String) -> String {
+        switch DomainCandidateParser().parse(urlString) {
+        case .success(.domain(let candidates)):
+            return QuickAddFormModel.fullHost(of: candidates)
+        case .success(.ip(let candidate)):
+            return candidate.value
+        case .failure:
+            return urlString
+        }
     }
 }
 

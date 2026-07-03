@@ -179,8 +179,10 @@ struct QuickAddFormModel: Equatable {
     /// The full normalized ASCII hostname carried by a domain outcome: the
     /// exact-host candidate when present, else the first candidate's value
     /// (which equals the full host when the host IS the registrable domain,
-    /// and for single-label hosts).
-    private static func fullHost(of candidates: [DomainCandidate]) -> String {
+    /// and for single-label hosts). Internal: `QuickAddRuleView.displayHost`
+    /// reuses it so the captured-host header and the saved value can never
+    /// disagree about what "the host" of a capture is.
+    static func fullHost(of candidates: [DomainCandidate]) -> String {
         candidates.first { $0.kind == .host }?.value ?? candidates[0].value
     }
 

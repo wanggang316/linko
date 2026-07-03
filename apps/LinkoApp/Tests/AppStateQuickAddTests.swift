@@ -79,6 +79,45 @@ final class AppStateQuickAddTests: XCTestCase {
         await waitUntil { state.quickAddCapture == .manual(nil) }
     }
 
+    // MARK: - Window close clears the capture
+
+    /// Closing the window after a capture settled — save, cancel, or the
+    /// close control — must drop the captured URL: the published state
+    /// returns to the manual baseline, so the full page URL never lingers in
+    /// memory behind a closed window.
+    func testClearAfterSettledCaptureDropsTheCapturedURL() async throws {
+        let state = try makeState()
+        state.beginQuickAddCapture { .captured(urlString: "https://private.example.com/path") }
+        await waitUntil { state.quickAddCapture == .captured(urlString: "https://private.example.com/path") }
+
+        state.clearQuickAddCapture()
+
+        XCTAssertEqual(state.quickAddCapture, .manual(nil))
+    }
+
+    /// Closing the window while a capture is still in flight must not
+    /// interrupt the landing: the clear is a no-op (the in-flight task owns
+    /// the state), the outcome still lands, and only a clear on the settled
+    /// machine takes effect.
+    func testClearWhileCaptureInFlightLeavesTheLandingAlone() async throws {
+        let state = try makeState()
+        let gate = Gate()
+        state.beginQuickAddCapture {
+            await gate.wait()
+            return .captured(urlString: "https://inflight.example.com/")
+        }
+        XCTAssertEqual(state.quickAddCapture, .capturing)
+
+        state.clearQuickAddCapture()
+        XCTAssertEqual(state.quickAddCapture, .capturing)
+
+        await gate.release()
+        await waitUntil { state.quickAddCapture == .captured(urlString: "https://inflight.example.com/") }
+
+        state.clearQuickAddCapture()
+        XCTAssertEqual(state.quickAddCapture, .manual(nil))
+    }
+
     // MARK: - Save visibility (Dashboard rules page derives from preferences)
 
     /// A quick-add save is a plain `updatePreferences` prepend: the published
@@ -129,6 +168,37 @@ final class AppStateQuickAddTests: XCTestCase {
         await state.updatePreferences(sheetPrefs)
 
         XCTAssertEqual(state.preferences.routing.rules, [quickRule, existing, sheetRule])
+        XCTAssertNil(state.lastErrorMessage)
+    }
+
+    /// The save paths (quick-add window and rules page) snapshot
+    /// `preferences` *inside* their `Task` — in the same main-actor turn as
+    /// `updatePreferences`, which reads and writes `preferences` with no
+    /// suspension in between. Two saves whose tasks were enqueued in the same
+    /// turn, before either update ran, therefore never build on the same
+    /// stale snapshot: the later task reads a state already carrying the
+    /// earlier rule, and both survive.
+    func testSnapshotInsideTheTaskNeverLosesAConcurrentSave() async throws {
+        let state = try makeState()
+        let first = RoutingRule(type: .domainSuffix, value: "first.example.com", target: "proxy")
+        let second = RoutingRule(type: .domainSuffix, value: "second.example.com", target: "proxy")
+
+        // Mirror the view-side pattern: both tasks created back-to-back in
+        // one turn, each deferring its snapshot into the task body.
+        let firstSave = Task {
+            var preferences = state.preferences
+            preferences.routing.rules.insert(first, at: 0)
+            await state.updatePreferences(preferences)
+        }
+        let secondSave = Task {
+            var preferences = state.preferences
+            preferences.routing.rules.insert(second, at: 0)
+            await state.updatePreferences(preferences)
+        }
+        await firstSave.value
+        await secondSave.value
+
+        XCTAssertEqual(state.preferences.routing.rules, [second, first])
         XCTAssertNil(state.lastErrorMessage)
     }
 

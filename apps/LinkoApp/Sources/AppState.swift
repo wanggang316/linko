@@ -1556,6 +1556,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Drops the captured page URL once the quick-add window goes away —
+    /// save, cancel, or the close control — so a full URL never lingers in
+    /// memory behind a closed window. A capture still in flight is left
+    /// alone: its task must land its outcome (interrupting it would fight
+    /// the single-flight guard above), and the next trigger's `.capturing`
+    /// reset clears that residue anyway.
+    func clearQuickAddCapture() {
+        guard quickAddCaptureTask == nil else { return }
+        quickAddCapture = .manual(nil)
+    }
+
     /// Snapshot of "the app the user was looking at": the frontmost
     /// application unless it is Linko itself, in which case the owner of the
     /// frontmost normal-level window of another regular app (CGWindowList
