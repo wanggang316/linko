@@ -102,6 +102,29 @@ UI points at `scripts/fetch-singbox.sh` or `brew install sing-box`.
   session). Run via `make test-app`; system effects stay behind the
   `AppDependencies` protocols (e.g. `TunnelControlling`).
 
+## Quick-add capture established in plan add-rule-for-current-page (M2)
+
+- **Source resolution happens before activation.** The menu row「为当前网页添加
+  规则…」resolves "the app the user was looking at" (the frontmost app, or the
+  first non-Linko layer-0 window owner in z-order when Linko itself is front)
+  *before* `NSApp.activate` brings Linko forward. Any refactor of
+  `AppState.captureCurrentPageAndOpenQuickAdd` must preserve that order, or
+  the frontmost-app signal is destroyed.
+- **Per-target TCC pre-check picks the read budget.** Automation permission
+  toward the one source browser is probed without prompting
+  (`AEDeterminePermissionToAutomateTarget`, `askUserIfNeeded: false`): denied
+  → immediate manual mode with a System Settings pointer (no Apple event is
+  sent; the check re-runs on every trigger, so re-allowing needs no relaunch),
+  undetermined → 30s first-consent budget, granted → 1s. The blocking
+  osascript read always runs detached off the main actor.
+- **The trigger state machine is single-flight.** `AppState.beginQuickAddCapture`
+  resets the published `QuickAddCaptureState` to `.capturing` on every settled
+  trigger — the quick-add window rebuilds its form from each fresh outcome, so
+  reopen/re-trigger never carries residue — and ignores triggers while a read
+  is in flight. The decision logic (`QuickAddCapture`, `QuickAddFormModel`) is
+  AppKit-free and unit-tested in LinkoAppTests; captured URLs live only in
+  memory and are never logged on either path.
+
 ## Milestone 2 plan: NetworkExtension / TUN (not in current scope)
 
 Replaces the system-proxy approach with an enhanced (TUN) mode so that all
