@@ -149,6 +149,58 @@ public protocol SystemProxyRunning: AnyObject {
     func restorePersistedSnapshotIfPresent() throws -> Bool
 }
 
+// MARK: - Browser page reading
+
+/// Typed failure taxonomy for reading a browser's current page URL.
+///
+/// Descriptions carry only the failure category and the browser's display
+/// name — never the page URL or the raw osascript output — so surfacing or
+/// logging an error can never leak what the user was browsing.
+public enum BrowserPageReadError: Error, Equatable, LocalizedError {
+    /// The bundle id is not one of the browsers the reader can script.
+    case unsupportedBrowser(bundleID: String)
+    /// The browser is running but has no window to read from.
+    case noWindow(browserName: String)
+    /// The script ran but produced no URL (e.g. an empty tab).
+    case emptyOutput(browserName: String)
+    /// macOS Automation permission (TCC) to control the browser was denied.
+    case permissionDenied(browserName: String)
+    /// The read did not finish within the reader's timeout.
+    case timedOut(browserName: String)
+    /// osascript failed in a way that matches no more specific category.
+    case scriptFailed(browserName: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .unsupportedBrowser(bundleID):
+            return "Reading the current page is not supported for \(bundleID)."
+        case let .noWindow(browserName):
+            return "\(browserName) has no window to read from."
+        case let .emptyOutput(browserName):
+            return "\(browserName) returned no page URL."
+        case let .permissionDenied(browserName):
+            return "Automation permission to control \(browserName) was denied."
+        case let .timedOut(browserName):
+            return "Reading the current page from \(browserName) timed out."
+        case let .scriptFailed(browserName):
+            return "Reading the current page from \(browserName) failed."
+        }
+    }
+}
+
+/// Reads the URL of the frontmost tab of a supported browser, identified by
+/// bundle id.
+///
+/// Implemented by `OsascriptBrowserPageReader` (Sources/LinkoKit/System/),
+/// which shells out to `/usr/bin/osascript` via the injected `ShellRunning`
+/// seam and bounds each read with a timeout. Every thrown error is a
+/// `BrowserPageReadError`.
+public protocol BrowserPageReading: Sendable {
+    /// Returns the URL string of the frontmost tab of the browser with
+    /// `browserBundleID`, or throws a `BrowserPageReadError`.
+    func currentPageURL(browserBundleID: String) throws -> String
+}
+
 // MARK: - Clash API
 
 /// A single proxy entry as reported by `GET /proxies`.
