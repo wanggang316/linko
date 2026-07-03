@@ -327,4 +327,54 @@ final class QuickAddFormModelTests: XCTestCase {
         XCTAssertEqual(rule?.isEnabled, true)
         XCTAssertEqual(rule?.subRules, [])
     }
+
+    // MARK: - Window-session integration
+
+    func testRebuiltFormCarriesNoResidueFromAPreviousSession() {
+        // VAL-QUICKADD-010 (model side): the view rebuilds the model from
+        // every fresh capture outcome; nothing from the previous session —
+        // edited value, retargeted tag, committed flag — survives into it.
+        var previous = form(capturing: "https://old.example.com/")
+        previous.updateValue("edited.example.com")
+        previous.targetTag = "direct"
+        XCTAssertNotNil(previous.commitRule())
+
+        let rebuilt = form(capturing: "https://www.example.com/")
+
+        XCTAssertEqual(rebuilt.value, "example.com")
+        XCTAssertEqual(rebuilt.ruleType, .domainSuffix)
+        XCTAssertEqual(rebuilt.targetTag, proxy)
+        XCTAssertFalse(rebuilt.isCommitted)
+        XCTAssertNil(rebuilt.prefillProblem)
+    }
+
+    func testTwoIndependentSessionsCommitEquivalentRulesWithDistinctIdentities() {
+        // VAL-QUICKADD-014 (model side): each window session mints a fresh
+        // rule id, so adding the same page twice yields two coexisting,
+        // equivalent rules rather than a collision.
+        var first = form(capturing: "https://www.example.com/")
+        var second = form(capturing: "https://www.example.com/")
+
+        let a = first.commitRule()
+        let b = second.commitRule()
+
+        XCTAssertNotNil(a)
+        XCTAssertNotNil(b)
+        XCTAssertNotEqual(a?.id, b?.id)
+        XCTAssertEqual(a?.type, b?.type)
+        XCTAssertEqual(a?.value, b?.value)
+        XCTAssertEqual(a?.target, b?.target)
+    }
+
+    func testCommitCarriesADriftedTargetTagVerbatim() {
+        // VAL-QUICKADD-013 (model side): the form only requires a non-empty
+        // target, so a group deleted after being picked still saves verbatim
+        // — flagging it unresolved is the rule list's concern, and skipping
+        // it at generation is the config builder's.
+        var model = form(capturing: "https://www.example.com/")
+        model.targetTag = "工作"
+
+        XCTAssertNil(model.validationProblem)
+        XCTAssertEqual(model.commitRule()?.target, "工作")
+    }
 }

@@ -1524,18 +1524,32 @@ final class AppState: ObservableObject {
         // fill it in asynchronously; a TCC prompt can then sit on screen for
         // as long as it needs without the window being held hostage.
         self.openWindow(id: WindowID.quickAddRule, using: openWindow)
-        // A capture already in flight keeps running (its result lands in the
-        // freshly focused window); starting a second read would only trip the
-        // reader's per-browser single-flight guard.
-        guard quickAddCaptureTask == nil else { return }
-        quickAddCapture = .capturing
-        quickAddCaptureTask = Task { [weak self] in
+        beginQuickAddCapture {
             // Detached: the reader blocks on osascript (up to the consent
             // timeout while a TCC prompt is up) and must never park the
             // main actor.
-            let state = await Task.detached(priority: .userInitiated) {
+            await Task.detached(priority: .userInitiated) {
                 Self.performQuickAddCapture(source: source)
             }.value
+        }
+    }
+
+    /// The state-machine half of the quick-add trigger: resets the published
+    /// capture to `.capturing` and runs `read` to completion. Every *settled*
+    /// trigger restarts from `.capturing` — even when the window is already
+    /// open with unsaved edits — so the form always rebuilds from the fresh
+    /// outcome and a previous session can leave no residue. Only a capture
+    /// still in flight is left alone (its result lands in the freshly focused
+    /// window; a second read would only trip the reader's per-browser
+    /// single-flight guard). Split from the AppKit trigger above so these
+    /// reset semantics stay unit-testable without a real osascript read.
+    func beginQuickAddCapture(
+        reading read: @escaping @Sendable () async -> QuickAddCaptureState
+    ) {
+        guard quickAddCaptureTask == nil else { return }
+        quickAddCapture = .capturing
+        quickAddCaptureTask = Task { [weak self] in
+            let state = await read()
             guard let self else { return }
             self.quickAddCapture = state
             self.quickAddCaptureTask = nil

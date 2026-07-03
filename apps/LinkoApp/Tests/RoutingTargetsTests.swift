@@ -31,4 +31,20 @@ final class RoutingTargetsTests: XCTestCase {
 
         XCTAssertEqual(targets.nodes.map(\.displayName), ["HK"])
     }
+
+    func testEmptyCatalogueSynthesizesProxyAndOffersNoEmptySections() {
+        // VAL-QUICKADD-015: with zero nodes and zero groups the catalogue
+        // still offers the built-ins with a synthesized "proxy" — the default
+        // target — and it resolves cleanly, so a rule saved against it shows
+        // no warning. Empty `groups`/`nodes` are what keep `TargetMenuItems`
+        // from rendering empty 策略组/节点 sections.
+        let targets = RoutingTargets(routing: .empty, nodes: [], nodeTags: [])
+
+        XCTAssertEqual(targets.builtins.map(\.tag), ["direct", "proxy", "reject"])
+        XCTAssertTrue(targets.groups.isEmpty)
+        XCTAssertTrue(targets.nodes.isEmpty)
+        XCTAssertEqual(targets.defaultTag, "proxy")
+        XCTAssertTrue(targets.isResolved("proxy"))
+        XCTAssertEqual(targets.resolve("proxy").displayName, "代理 (proxy)")
+    }
 }
