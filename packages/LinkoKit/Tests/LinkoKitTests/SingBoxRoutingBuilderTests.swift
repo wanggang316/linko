@@ -717,6 +717,26 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertTrue(warnings.isEmpty, "\(warnings)")
     }
 
+    func testFinalRuleTargetingRejectIsInertAndKeepsFinal() throws {
+        // FINAL,REJECT / MATCH,REJECT import as a `.final` rule targeting the
+        // reject action. The engine must neither emit it as a rules entry nor
+        // let it rewrite route.final — only the user's configured final holds.
+        let routing = RoutingConfig(
+            rules: [
+                RoutingRule(type: .domainKeyword, value: "ads", target: "REJECT"),
+                RoutingRule(type: .final, value: "", target: "REJECT"),
+            ],
+            finalTarget: "proxy"
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        XCTAssertEqual(try route(in: config)["final"] as? String, "proxy")
+        let rules = try rules(in: config)
+        // Only the leaf reject rule survives; the FINAL line is inert.
+        XCTAssertEqual(rules.count, 1)
+        XCTAssertEqual(rules[0]["action"] as? String, "reject")
+        XCTAssertEqual(rules[0]["domain_keyword"] as? [String], ["ads"])
+    }
+
     func testRejectFinalFallsBackToProxyWithWarning() throws {
         let routing = RoutingConfig(finalTarget: "REJECT")
         let config = try buildJSON(nodes: [ssNode("A")], routing: routing)

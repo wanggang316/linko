@@ -226,7 +226,10 @@ struct ImportRulesView: View {
             return
         }
         let result = runImporter(on: text)
-        let unresolved = result.referencedPolicies.filter { !existingPolicyTags.contains($0) }
+        // Reject spellings (REJECT and its Surge variants, any casing) resolve
+        // via the engine predicate even though `existingPolicyTags` only holds
+        // the lowercase built-in tag, so they never count as unmatched.
+        let unresolved = result.unresolvedPolicies(existingTags: existingPolicyTags)
         preview = Preview(
             rules: result.rules,
             referencedPolicies: result.referencedPolicies,
