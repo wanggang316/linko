@@ -6,6 +6,7 @@ import SwiftUI
 enum WindowID {
     static let importSubscription = "import-subscription"
     static let dashboard = "dashboard"
+    static let quickAddRule = "quick-add-rule"
 }
 
 @main
@@ -37,6 +38,12 @@ struct LinkoApp: App {
 
         Window("导入订阅", id: WindowID.importSubscription) {
             ImportSubscriptionView()
+                .environmentObject(appState)
+        }
+        .windowResizability(.contentSize)
+
+        Window("添加规则", id: WindowID.quickAddRule) {
+            QuickAddRuleView()
                 .environmentObject(appState)
         }
         .windowResizability(.contentSize)

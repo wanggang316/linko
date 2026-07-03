@@ -91,6 +91,9 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         # Required for the app to request its packet-tunnel system extension.
         INFOPLIST_KEY_NSSystemExtensionUsageDescription: "Linko 使用系统扩展以 TUN 全局模式接管网络流量。"
+        # Shown in the Automation TCC prompt when Linko reads the frontmost
+        # browser's page URL (为当前网页添加规则).
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Linko 需要读取浏览器当前页面的地址，用于快速创建分流规则。"
         # Sparkle's SU* Info.plist keys live in apps/LinkoApp/Info.plist —
         # INFOPLIST_KEY_* build settings only cover Xcode's whitelisted keys
         # and silently drop custom ones like the Sparkle family.
