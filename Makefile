@@ -2,7 +2,7 @@ PROJECT := Linko.xcodeproj
 SCHEME := LinkoApp
 CONFIG := Debug
 
-.PHONY: gen build test fetch-core run clean archive release dmg bump-version
+.PHONY: gen build test test-app fetch-core run clean archive release dmg bump-version
 
 gen:
 	xcodegen generate
@@ -12,6 +12,12 @@ build: gen
 
 test:
 	cd packages/LinkoKit && swift test
+
+# App-layer unit tests (LinkoAppTests). Separate from `test` (LinkoKit via
+# SwiftPM): this drives xcodebuild against the generated project. The bundle
+# is host-free and unsigned, so it runs on any machine without identities.
+test-app: gen
+	xcodebuild -project $(PROJECT) -scheme LinkoAppTests -configuration $(CONFIG) -destination "platform=macOS" test CODE_SIGNING_ALLOWED=NO
 
 fetch-core:
 	./scripts/fetch-singbox.sh

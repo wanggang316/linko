@@ -32,6 +32,8 @@ targets:
           # The .icon bundle is added explicitly below as an opaque resource;
           # excluding it here stops XcodeGen from recursing into it as a group.
           - "Linko.icon"
+          # Unit tests belong to LinkoAppTests only (they import XCTest).
+          - "Tests"
       # App icon authored in Icon Composer (Xcode 26+). The .icon is the
       # editable source of truth — open it in Icon Composer to edit layers.
       - path: apps/LinkoApp/Linko.icon
@@ -106,6 +108,33 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: Developer ID Application
         PROVISIONING_PROFILE_SPECIFIER: Linko DeveloperID
+
+  LinkoAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      # The app sources are compiled directly into the test bundle instead of
+      # injecting into a running Linko.app host: the app is an LSUIElement
+      # menu-bar app whose launch resumes the previous session's proxy state,
+      # so hosting tests inside it would touch the developer's real network
+      # and NetworkExtension preferences. Compiling twice buys hermetic,
+      # host-free tests (all system effects stay behind injected protocols).
+      - path: apps/LinkoApp/Sources
+      - path: apps/LinkoApp/Tests
+    scheme:
+      testTargets:
+        - LinkoAppTests
+    dependencies:
+      - package: LinkoKit
+      # UpdaterController imports Sparkle, so the test bundle links it too.
+      - package: Sparkle
+        product: Sparkle
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gumpw.linko.tests
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
 
   LinkoTunnel:
     type: system-extension
