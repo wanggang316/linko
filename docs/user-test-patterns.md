@@ -179,3 +179,4 @@
 **Format:** `- [YYYY-MM-DD] <surface / step>: <fact>. <what to do next time>.`
 
 - [2026-07-03] LinkoKit swift test: worktree 复用旧 `.build` 报 ModuleCache 旧路径错误；删 `packages/LinkoKit/.build/arm64-apple-macosx/debug/ModuleCache` 重跑即可。
+- [2026-07-03] Apple Events 首次授权（quick-add 捕获）: 授权弹窗在屏预算为 30s——超过则当次读取按超时降级为手动模式（授权本身仍生效，重新触发即可预填）；TCC 状态每次触发都重查，拒绝后在系统设置重新允许无需重启 app。探测 VAL-CAPTURE-004 时应在 30s 内应答弹窗。
