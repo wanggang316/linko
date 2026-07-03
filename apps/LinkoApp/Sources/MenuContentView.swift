@@ -12,6 +12,9 @@ import SwiftUI
 struct MenuContentView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openWindow) private var openWindow
+    /// Dismisses the MenuBarExtra panel itself (clicking a row does not close
+    /// it automatically the way a real NSMenu would).
+    @Environment(\.dismiss) private var dismissMenu
 
     /// Self-contained traffic meter for the header rates, so the menu does not
     /// depend on the Dashboard view model being present in its environment.
@@ -35,6 +38,7 @@ struct MenuContentView: View {
             if let message = appState.lastErrorMessage {
                 noticeBanner(message)
             }
+            quickAddRuleRow
             nodeSection
             footer
         }
@@ -183,6 +187,36 @@ struct MenuContentView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
                 .fill(Theme.Color.info.opacity(0.1))
         )
+    }
+
+    // MARK: - Quick add rule
+
+    /// Visible-text entry for「为当前网页添加规则」. Deliberately independent
+    /// of the core lifecycle: capture only reads the frontmost browser's
+    /// page, so the row stays enabled while the core is stopped, failed,
+    /// switching, or the binary is missing.
+    private var quickAddRuleRow: some View {
+        Button {
+            // The source app is resolved inside the call, *before* the app
+            // activates; only then is the panel dismissed.
+            appState.captureCurrentPageAndOpenQuickAdd(using: { openWindow(id: $0) })
+            dismissMenu()
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.Color.accent)
+                Text("为当前网页添加规则…")
+                    .font(Theme.Font.bodyEmphasized)
+                    .foregroundStyle(Theme.Color.label)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.xs - 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(cornerRadius: Theme.Radius.small)
     }
 
     // MARK: - Node section

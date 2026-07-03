@@ -84,6 +84,10 @@ final class AppState: ObservableObject {
     /// the user can see what their rules will match against. `nil` until the
     /// path monitor reports its first update.
     @Published private(set) var currentNetwork: NetworkSnapshot?
+    /// Capture state backing the quick-add-rule window（为当前网页添加规则）.
+    /// Reset to `.capturing` on every menu trigger so a re-open always shows
+    /// the fresh capture, never a stale one.
+    @Published private(set) var quickAddCapture: QuickAddCaptureState = .manual(nil)
 
     // MARK: - Dependencies
 
@@ -127,6 +131,12 @@ final class AppState: ObservableObject {
 
     /// Watches the active network and drives network-based profile switching.
     private let networkMonitor = NetworkMonitor()
+
+    /// In-flight page capture for the quick-add window; `nil` when idle. A
+    /// trigger landing while a capture runs only refocuses the window (so a
+    /// double-click can't spawn a second read against the reader's
+    /// per-browser single-flight guard).
+    private var quickAddCaptureTask: Task<Void, Never>?
 
     // MARK: - Multi-profile state
 
@@ -1496,6 +1506,166 @@ final class AppState: ObservableObject {
         openWindow(id)
     }
 
+    // MARK: - Quick add rule (capture current page)
+
+    /// The menu's「为当前网页添加规则…」entry point: resolves which app the
+    /// user was looking at, surfaces the quick-add window immediately, and
+    /// reads the browser's frontmost page URL off the main actor. Deliberately
+    /// independent of the core lifecycle — capture works with the core
+    /// stopped, failed, or the binary missing.
+    ///
+    /// Ordering matters: the source app is resolved *before* `NSApp.activate`
+    /// (inside `openWindow(id:using:)`), because activation puts Linko itself
+    /// in front and destroys the "which app was the user in" signal.
+    func captureCurrentPageAndOpenQuickAdd(using openWindow: (String) -> Void) {
+        let source = resolveCaptureSource()
+        // Surface the window right away — `Window(id:)` is single-instance,
+        // so re-triggering focuses the existing one — and let the capture
+        // fill it in asynchronously; a TCC prompt can then sit on screen for
+        // as long as it needs without the window being held hostage.
+        self.openWindow(id: WindowID.quickAddRule, using: openWindow)
+        // A capture already in flight keeps running (its result lands in the
+        // freshly focused window); starting a second read would only trip the
+        // reader's per-browser single-flight guard.
+        guard quickAddCaptureTask == nil else { return }
+        quickAddCapture = .capturing
+        quickAddCaptureTask = Task { [weak self] in
+            // Detached: the reader blocks on osascript (up to the consent
+            // timeout while a TCC prompt is up) and must never park the
+            // main actor.
+            let state = await Task.detached(priority: .userInitiated) {
+                Self.performQuickAddCapture(source: source)
+            }.value
+            guard let self else { return }
+            self.quickAddCapture = state
+            self.quickAddCaptureTask = nil
+        }
+    }
+
+    /// Snapshot of "the app the user was looking at": the frontmost
+    /// application unless it is Linko itself, in which case the owner of the
+    /// frontmost normal-level window of another regular app (CGWindowList
+    /// enumerates on-screen windows front to back).
+    private func resolveCaptureSource() -> QuickAddCapture.SourceApp? {
+        let frontmost = NSWorkspace.shared.frontmostApplication
+            .map(QuickAddCapture.SourceApp.init(app:))
+        return QuickAddCapture.resolveSource(
+            frontmost: frontmost,
+            ownBundleID: Bundle.main.bundleIdentifier,
+            windowOwnersFrontToBack: Self.onScreenRegularWindowOwners()
+        )
+    }
+
+    /// Owners of on-screen, normal-level (layer 0) windows, front to back,
+    /// restricted to regular applications. Only owner PIDs and layers are
+    /// read — never window names/contents — so no extra TCC permission is
+    /// involved.
+    private static func onScreenRegularWindowOwners() -> [QuickAddCapture.SourceApp] {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return [] }
+        var owners: [QuickAddCapture.SourceApp] = []
+        var seenPIDs: Set<pid_t> = []
+        for window in windows {
+            guard
+                (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)
+                    .map({ pid_t($0.int32Value) }),
+                seenPIDs.insert(pid).inserted,
+                let app = NSRunningApplication(processIdentifier: pid),
+                app.activationPolicy == .regular
+            else { continue }
+            owners.append(QuickAddCapture.SourceApp(app: app))
+        }
+        return owners
+    }
+
+    /// Blocking capture pipeline (runs detached, never on the main actor):
+    /// browser-support gate → per-app TCC pre-check → osascript read. Both
+    /// the success and failure paths keep the URL (and raw script output)
+    /// out of the logs — nothing here prints.
+    private nonisolated static func performQuickAddCapture(
+        source: QuickAddCapture.SourceApp?
+    ) -> QuickAddCaptureState {
+        guard let source else {
+            return .manual(QuickAddCapture.guidance(for: .noSourceApp))
+        }
+        guard let bundleID = source.bundleID,
+              OsascriptBrowserPageReader.supportedBundleIDs.contains(bundleID) else {
+            return .manual(QuickAddCapture.guidance(for: .unsupportedApp(name: source.name)))
+        }
+        let browserName = source.name ?? bundleID
+        let timeout: TimeInterval
+        switch automationPermission(forBundleID: bundleID) {
+        case .denied:
+            // Declined earlier (or blocked by policy): degrade to manual
+            // right away with the System Settings pointer; no Apple event is
+            // sent. The check re-runs on every trigger, so re-allowing in
+            // 系统设置 works without relaunching Linko.
+            return .manual(QuickAddCapture.guidance(
+                for: .permissionDenied(browserName: browserName)
+            ))
+        case .undetermined:
+            // First-ever consent: the TCC prompt blocks osascript until the
+            // user answers, so its on-screen time is exempted from the
+            // normal budget via the long timeout.
+            timeout = QuickAddCapture.consentReadTimeout
+        case .granted:
+            timeout = QuickAddCapture.normalReadTimeout
+        }
+        do {
+            let url = try OsascriptBrowserPageReader(timeout: timeout)
+                .currentPageURL(browserBundleID: bundleID)
+            return .captured(urlString: url)
+        } catch let error as BrowserPageReadError {
+            return .manual(QuickAddCapture.guidance(
+                for: QuickAddCapture.Failure(error, appName: source.name)
+            ))
+        } catch {
+            return .manual(QuickAddCapture.guidance(
+                for: .scriptFailed(browserName: browserName)
+            ))
+        }
+    }
+
+    /// Automation (Apple events) TCC state toward one target application.
+    private enum AutomationPermission {
+        case granted
+        /// The user has not answered the consent prompt yet — the next Apple
+        /// event will put it on screen.
+        case undetermined
+        case denied
+    }
+
+    /// Pre-checks Automation permission toward `bundleID` without prompting
+    /// (`askUserIfNeeded: false`), so the caller can pick the right read
+    /// timeout — or skip the read entirely on a denial. Only ever probes the
+    /// *one* browser the user is in front of; never sweeps the supported list.
+    private nonisolated static func automationPermission(
+        forBundleID bundleID: String
+    ) -> AutomationPermission {
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
+        guard let descriptor = target.aeDesc else { return .granted }
+        let status = withExtendedLifetime(target) {
+            AEDeterminePermissionToAutomateTarget(
+                descriptor,
+                AEEventClass(typeWildCard),
+                AEEventID(typeWildCard),
+                false
+            )
+        }
+        switch status {
+        case -1743: // errAEEventNotPermitted — declined (or blocked by policy).
+            return .denied
+        case -1744: // errAEEventWouldRequireUserConsent — prompt not answered yet.
+            return .undetermined
+        default:
+            // noErr (granted), procNotFound (target gone — the reader will
+            // classify), or anything unexpected: proceed with a normal read.
+            return .granted
+        }
+    }
+
     // MARK: - Private helpers
 
     private func clashAPIClient() -> ClashAPIProviding {
@@ -1857,5 +2027,15 @@ extension AppState: ProfileManaging {
         persistJSON(subscriptions, to: subscriptionsFileURL, what: "订阅")
         saveProfiles()
         rescheduleAutoUpdate()
+    }
+}
+
+// MARK: - Capture source bridging
+
+/// AppKit → value-snapshot bridge, kept here so `QuickAddCapture` itself
+/// stays AppKit-free (and unit-testable).
+private extension QuickAddCapture.SourceApp {
+    init(app: NSRunningApplication) {
+        self.init(bundleID: app.bundleIdentifier, name: app.localizedName)
     }
 }

@@ -20,5 +20,10 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
+    <!-- Send Apple events to the frontmost browser to read its current page
+         URL (为当前网页添加规则). Scoped to Automation TCC: the user still
+         grants each browser individually. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>
