@@ -106,8 +106,9 @@ public enum DomainCandidateError: Error, Hashable, Sendable {
 ///   host + port, `about:blank` is a failure).
 ///
 /// Candidates only depend on the host. Hosts are lowercased, FQDN trailing
-/// dots stripped, and IDN labels punycode-encoded, so a Unicode host and its
-/// ACE form produce identical results. Dotted all-numeric hosts must be
+/// dots stripped, NFC-normalized, and IDN labels punycode-encoded, so a
+/// Unicode host (composed or decomposed) and its ACE form produce identical
+/// results. Dotted all-numeric hosts must be
 /// canonical IPv4 literals (no leading zeros) or fail. Hosts breaching the
 /// RFC 1035 length limits (63 bytes per label, 253 total, on the ASCII form)
 /// fail closed.
@@ -228,6 +229,25 @@ public struct DomainCandidateParser {
         var host = raw.lowercased()
         if host.hasSuffix(".") { host.removeLast() } // FQDN trailing dot
         guard !host.isEmpty else { return .failure(.missingHost) }
+
+        // NFC before any per-label work: IDNA operates on the precomposed
+        // form, so a decomposed input ("cafe" + COMBINING ACUTE) must
+        // converge on the same ACE label as its precomposed spelling.
+        // Composition never crosses a "." (a starter with no composition
+        // entries), so normalizing the whole host is equivalent to
+        // normalizing each label.
+        host = host.precomposedStringWithCanonicalMapping
+
+        // Cheap scalar-count pre-check before the punycode encoder runs. The
+        // wire form is never shorter than the (NFC) scalar count — pure-ASCII
+        // labels are byte-for-byte, encoded labels are "xn--" plus at least
+        // one digit per scalar — so input past 253 scalars can only fail the
+        // post-encoding check anyway. Rejecting it here keeps hostile bulk
+        // (tens of thousands of distinct scalars in one label) from burning
+        // seconds of CPU in the encoder first.
+        guard host.unicodeScalars.count <= 253 else {
+            return .failure(.invalidHost("host longer than 253 bytes"))
+        }
 
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.allSatisfy({ !$0.isEmpty }) else {

@@ -165,7 +165,9 @@ public enum BrowserPageReadError: Error, Equatable, LocalizedError {
     case emptyOutput(browserName: String)
     /// macOS Automation permission (TCC) to control the browser was denied.
     case permissionDenied(browserName: String)
-    /// The read did not finish within the reader's timeout.
+    /// The read did not finish within the reader's timeout, or another read
+    /// of the same browser was still in flight (busy) and this one failed
+    /// fast instead of stacking behind it.
     case timedOut(browserName: String)
     /// osascript failed in a way that matches no more specific category.
     case scriptFailed(browserName: String)

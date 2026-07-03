@@ -499,10 +499,15 @@ struct TargetMenuItems: View {
 
     /// Exact tag match, except reject: legacy rules may store any casing or
     /// Surge variant (REJECT, reject-drop, …), all of which the engine — and
-    /// therefore this menu — treats as the one built-in reject item.
+    /// therefore this menu — treats as the one built-in reject item. When the
+    /// stored tag is a reject spelling, only the *built-in* item shows the
+    /// checkmark: a policy group sharing the name is shadowed by the reject
+    /// action, so ticking it too would claim a group routing that never runs.
     private func isSelected(_ target: RoutingTarget) -> Bool {
-        if target.tag == selectedTag { return true }
-        return BuiltinReject.matches(target.tag) && BuiltinReject.matches(selectedTag)
+        if BuiltinReject.matches(selectedTag) {
+            return target.kind == .builtin && BuiltinReject.matches(target.tag)
+        }
+        return target.tag == selectedTag
     }
 }
 

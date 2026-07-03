@@ -306,6 +306,40 @@ final class DomainCandidatesTests: XCTestCase {
         XCTAssertNotNil(failure("\(wideLabel).example.com"))
     }
 
+    func testOverlongUnicodeHostFailsFastBeforePunycodeEncoding() {
+        // The scalar-count pre-check must reject oversized Unicode input
+        // before the punycode encoder runs: the wire form is never shorter
+        // than the scalar count, so 254+ scalars can never satisfy the
+        // 253-byte limit. The bulk case pins the fast path — 20k *distinct*
+        // scalars in one label would burn seconds inside the encoder if the
+        // length check still ran after encoding.
+        let minimalBreach = String(repeating: "例", count: 254)
+        XCTAssertNotNil(failure(minimalBreach))
+        XCTAssertNotNil(failure("https://\(minimalBreach)/"))
+
+        var bulkLabel = ""
+        bulkLabel.unicodeScalars.append(
+            contentsOf: (0..<20_000).compactMap { Unicode.Scalar(0x4E00 + $0) }
+        )
+        XCTAssertNotNil(failure(bulkLabel))
+        XCTAssertNotNil(failure("https://\(bulkLabel).example.com/"))
+    }
+
+    func testDecomposedUnicodeHostConvergesWithPrecomposedForm() {
+        // NFC normalization: "café" typed as NFD ("cafe" + COMBINING ACUTE)
+        // must produce the same ACE candidates as the precomposed spelling.
+        let precomposed = "caf\u{00E9}.com"
+        let decomposed = "cafe\u{0301}.com"
+        XCTAssertEqual(parser.parse(decomposed), parser.parse(precomposed))
+        XCTAssertEqual(domainCandidates(decomposed), [
+            DomainCandidate(kind: .suffix, value: "xn--caf-dma.com"),
+        ])
+        XCTAssertEqual(
+            parser.parse("https://www.\(decomposed)/path"),
+            parser.parse("https://www.\(precomposed)/path")
+        )
+    }
+
     // MARK: - VAL-DOMAIN-011
 
     func testShapeInvariantsAcrossInputs() {

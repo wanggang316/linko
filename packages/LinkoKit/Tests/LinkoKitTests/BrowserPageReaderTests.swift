@@ -139,6 +139,56 @@ final class BrowserPageReaderTests: XCTestCase {
         }
     }
 
+    func testPermissionDeniedIsClassifiedFromPrivilegeViolationErrorCode() {
+        // The other TCC-denial shape: errAEPrivilegeError (-10004).
+        let shell = FakeShell()
+        shell.response = ShellResult(
+            exitCode: 1,
+            standardOutput: "",
+            standardError: "execution error: Google Chrome got an error: A privilege violation occurred. (-10004)"
+        )
+
+        XCTAssertThrowsError(
+            try makeReader(shell: shell).currentPageURL(browserBundleID: "com.google.Chrome")
+        ) { error in
+            XCTAssertEqual(error as? BrowserPageReadError, .permissionDenied(browserName: "Google Chrome"))
+        }
+    }
+
+    func testNoWindowIsClassifiedFromNoSuchObjectErrorCode() {
+        // The other windowless shape: errAENoSuchObject (-1728), reported
+        // when `front window` can't be resolved at all.
+        let shell = FakeShell()
+        shell.response = ShellResult(
+            exitCode: 1,
+            standardOutput: "",
+            standardError: "execution error: Safari got an error: Can’t get front window. (-1728)"
+        )
+
+        XCTAssertThrowsError(
+            try makeReader(shell: shell).currentPageURL(browserBundleID: "com.apple.Safari")
+        ) { error in
+            XCTAssertEqual(error as? BrowserPageReadError, .noWindow(browserName: "Safari"))
+        }
+    }
+
+    func testBareCodeSubstringWithoutParenthesesIsNotMisclassified() {
+        // Codes are matched in osascript's parenthesized form; a bare digit
+        // run inside the message text must not steal the classification.
+        let shell = FakeShell()
+        shell.response = ShellResult(
+            exitCode: 1,
+            standardOutput: "",
+            standardError: "execution error: Window -1743 misbehaved in some novel way. (-2700)"
+        )
+
+        XCTAssertThrowsError(
+            try makeReader(shell: shell).currentPageURL(browserBundleID: "com.apple.Safari")
+        ) { error in
+            XCTAssertEqual(error as? BrowserPageReadError, .scriptFailed(browserName: "Safari"))
+        }
+    }
+
     func testNoWindowIsClassifiedFromInvalidIndexErrorCode() {
         let shell = FakeShell()
         shell.response = ShellResult(

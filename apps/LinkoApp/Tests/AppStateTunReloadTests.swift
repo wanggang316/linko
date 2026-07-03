@@ -72,28 +72,109 @@ final class AppStateTunReloadTests: XCTestCase {
         XCTAssertNil(fixture.state.lastErrorMessage)
     }
 
+    /// A routing edit landing inside an in-flight reload/restart window —
+    /// when `isProxyActive` briefly reads false but `isSwitchingProxy` is
+    /// true — must still arm a follow-up reload instead of being silently
+    /// dropped (persisted but never applied to the running core).
+    func testRoutingEditDuringInFlightReloadStillTriggersAFollowUpReload() async throws {
+        let fixture = try await makeTunReadyFixture()
+        fixture.tunnel.holdReload = true
+
+        var prefs = fixture.state.preferences
+        prefs.routing.finalTarget = "direct"
+        await fixture.state.updatePreferences(prefs)
+
+        // The debounced fire lands and its reload hangs in flight.
+        await waitUntil(timeout: 5) { fixture.tunnel.calls == [.reload] }
+
+        // Mid-restart the active mode briefly reports inactive — the exact
+        // window the `isSwitchingProxy` condition covers. An edit landing
+        // here must not be dropped.
+        fixture.tunnel.isActive = false
+        prefs.routing.finalTarget = "block"
+        await fixture.state.updatePreferences(prefs)
+
+        // The restart window closes: the tunnel is back up and the hung
+        // reload returns.
+        fixture.tunnel.isActive = true
+        fixture.tunnel.holdReload = false
+        fixture.tunnel.releaseReload()
+
+        // The second edit's debounced reload still fires.
+        await waitUntil(timeout: 5) { fixture.tunnel.calls == [.reload, .reload] }
+        XCTAssertEqual(fixture.tunnel.calls, [.reload, .reload])
+        XCTAssertNil(fixture.state.lastErrorMessage)
+    }
+
+    /// A rebuilt TUN config that fails pre-flight validation must never reach
+    /// the tunnel: no reload, no fallback stop/start — the old config keeps
+    /// serving — and the failure is surfaced (VAL-RELOAD-016: error visible,
+    /// state truthful, nothing blackholed).
+    func testTunReloadPreflightFailureKeepsTunnelOnOldConfigAndSurfacesError() async throws {
+        let fixture = try await makeTunReadyFixture()
+        fixture.validator.result = ConfigValidationResult(
+            isValid: false, errors: ["unknown rule target"], warnings: []
+        )
+
+        var edited = fixture.node
+        edited.server = "updated.example.com"
+        await fixture.state.updateManualNode(edited)
+
+        XCTAssertEqual(fixture.tunnel.calls, [])
+        XCTAssertEqual(
+            fixture.state.lastErrorMessage,
+            "TUN 配置校验未通过，隧道仍在运行旧配置：unknown rule target"
+        )
+    }
+
+    /// Once the validator accepts again, the reload path recovers on its own
+    /// (VAL-RELOAD-016: a rejected edit never wedges the reload machinery).
+    func testTunReloadRecoversAfterPreflightFailureIsFixed() async throws {
+        let fixture = try await makeTunReadyFixture()
+        fixture.validator.result = ConfigValidationResult(
+            isValid: false, errors: ["unknown rule target"], warnings: []
+        )
+
+        var edited = fixture.node
+        edited.server = "bad.example.com"
+        await fixture.state.updateManualNode(edited)
+        XCTAssertEqual(fixture.tunnel.calls, [])
+
+        fixture.validator.result = ConfigValidationResult(isValid: true, errors: [], warnings: [])
+        edited.server = "good.example.com"
+        await fixture.state.updateManualNode(edited)
+
+        XCTAssertEqual(fixture.tunnel.calls, [.reload])
+        XCTAssertTrue(fixture.tunnel.reloadedConfigs.last?.contains("good.example.com") ?? false)
+        XCTAssertNil(fixture.state.lastErrorMessage)
+    }
+
     // MARK: - Fixture
 
     private struct Fixture {
         let state: AppState
         let tunnel: TunnelControllerMock
         let builder: ConfigBuilderMock
+        let validator: ConfigValidatorMock
         let node: ProxyNode
     }
 
     /// Builds an `AppState` on mocks, drives it into `.tun` mode with one
     /// selected manual node, and marks the mock tunnel active — the state
-    /// every test starts from. Uses only public `AppState` surface.
+    /// every test starts from. Drives `AppState` through its regular
+    /// (module-internal) surface — the app sources are compiled into this
+    /// bundle, so no test-only backdoors exist or are needed.
     private func makeTunReadyFixture() async throws -> Fixture {
         let supportDirectory = try makeSupportDirectory()
         let tunnel = TunnelControllerMock()
         let builder = ConfigBuilderMock()
+        let validator = ConfigValidatorMock()
         let dependencies = AppDependencies(
             coreRunner: CoreRunnerMock(),
             systemProxy: SystemProxyMock(),
             configBuilder: builder,
             subscriptionParser: SubscriptionParserMock(),
-            configValidator: ConfigValidatorMock(),
+            configValidator: validator,
             loginItem: LoginItemMock(),
             makeClashAPI: { _ in ClashAPIMock() },
             tunnelController: tunnel
@@ -118,7 +199,7 @@ final class AppStateTunReloadTests: XCTestCase {
         )
         state.addManualNode(node)  // Auto-selects the first node.
         tunnel.isActive = true
-        return Fixture(state: state, tunnel: tunnel, builder: builder, node: node)
+        return Fixture(state: state, tunnel: tunnel, builder: builder, validator: validator, node: node)
     }
 
     /// A fresh per-test support directory, removed on teardown.
@@ -157,10 +238,15 @@ private final class TunnelControllerMock: TunnelControlling {
     }
 
     /// Mirrors `TunnelController.isActive`; tests flip it to simulate a
-    /// running tunnel. `stop()` clears it like a real teardown would.
+    /// running tunnel. `stop()` clears it and a successful `start()` sets it,
+    /// like the real teardown/bring-up would.
     var isActive = false
     var startError: Error?
     var reloadError: Error?
+    /// When true, `reload` suspends after recording until `releaseReload()`,
+    /// so tests can land edits inside an in-flight reload window.
+    var holdReload = false
+    private var reloadWaiters: [CheckedContinuation<Void, Never>] = []
 
     private(set) var calls: [Call] = []
     private(set) var startedConfigs: [String] = []
@@ -176,6 +262,7 @@ private final class TunnelControllerMock: TunnelControlling {
         calls.append(.start)
         startedConfigs.append(configJSON)
         if let startError { throw startError }
+        isActive = true
     }
 
     func stop() {
@@ -186,7 +273,19 @@ private final class TunnelControllerMock: TunnelControlling {
     func reload(configJSON: String) async throws {
         calls.append(.reload)
         reloadedConfigs.append(configJSON)
+        if holdReload {
+            await withCheckedContinuation { reloadWaiters.append($0) }
+        }
         if let reloadError { throw reloadError }
+    }
+
+    /// Resumes every reload suspended by `holdReload`.
+    func releaseReload() {
+        let waiters = reloadWaiters
+        reloadWaiters = []
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 }
 
@@ -249,11 +348,14 @@ private struct SubscriptionParserMock: SubscriptionParsing {
     }
 }
 
-/// Always valid: the TUN tests exercise reload/fallback sequencing, not
-/// pre-flight validation (covered by LinkoKit's ConfigValidatorTests).
-private struct ConfigValidatorMock: ConfigValidating {
+/// Serves an injectable validation verdict (valid by default): the reload
+/// pre-flight must keep a rejected config away from the running tunnel.
+/// `result` is only mutated from the main actor before a validation runs.
+private final class ConfigValidatorMock: ConfigValidating, @unchecked Sendable {
+    var result = ConfigValidationResult(isValid: true, errors: [], warnings: [])
+
     func validate(configFileURL: URL, binaryURL: URL) -> ConfigValidationResult {
-        ConfigValidationResult(isValid: true, errors: [], warnings: [])
+        result
     }
 }
 
