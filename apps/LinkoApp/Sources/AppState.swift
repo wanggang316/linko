@@ -114,6 +114,17 @@ final class AppState: ObservableObject {
     /// survives across turns and is cancelled/rescheduled on pref changes.
     private let autoUpdateScheduler = AutoUpdateScheduler()
 
+    /// Coalesces routing-edit core reloads. Routing surfaces persist through
+    /// `updatePreferences` on every gesture — the DNS page commits per
+    /// keystroke — so each routing delta must not restart the core
+    /// individually. Edits landing inside the quiet window merge into a single
+    /// reload that rebuilds from the then-current preferences. The window is
+    /// 1.2s: strictly above 1s so edits arriving up to a second apart still
+    /// coalesce into one restart, and small enough that the last edit is
+    /// serving traffic (config rewritten and reload underway) well inside a
+    /// 3-second budget. Persistence is never debounced — only the core reload.
+    private let routingReloadDebouncer = Debouncer(quietWindow: 1.2)
+
     /// Watches the active network and drives network-based profile switching.
     private let networkMonitor = NetworkMonitor()
 
@@ -335,6 +346,10 @@ final class AppState: ObservableObject {
         guard preferences.proxyMode != mode else { return }
         await runSerializedLifecycle { [self] in
             guard preferences.proxyMode != mode else { return }
+            // The bring-up below (or the next manual start) already uses the
+            // latest preferences, so any routing reload still pending in the
+            // debounce window is covered; drop it instead of reloading twice.
+            routingReloadDebouncer.cancel()
             let wasActive = isProxyActive
             // Tear down whatever the *current* mode has running.
             switch preferences.proxyMode {
@@ -460,7 +475,8 @@ final class AppState: ObservableObject {
     /// Re-applies the generated config to whatever is currently running,
     /// dispatched by mode. Called when a config-affecting change lands
     /// (subscription import/removal that backs the selected node, a port
-    /// change, a failed selector update). A no-op when nothing is active.
+    /// change, a failed selector update, a debounced routing edit). A no-op
+    /// when nothing is active.
     ///
     /// - `.systemProxy`: restarts the sing-box subprocess (the M1 behavior).
     /// - `.tun`: hot-reloads the running tunnel in place via the extension's
@@ -474,10 +490,22 @@ final class AppState: ObservableObject {
             await runSerializedLifecycle { [self] in
                 guard tunnelController.isActive else { return }
                 let nodes = allNodes
-                guard !nodes.isEmpty,
-                      let configData = try? buildTunConfig(nodes: nodes),
-                      let configJSON = String(data: configData, encoding: .utf8)
-                else { return }
+                guard !nodes.isEmpty else { return }
+                let configJSON: String
+                do {
+                    let configData = try buildTunConfig(nodes: nodes)
+                    guard let json = String(data: configData, encoding: .utf8) else {
+                        lastErrorMessage = "TUN 配置编码失败，隧道仍在运行旧配置。"
+                        return
+                    }
+                    configJSON = json
+                } catch {
+                    // Keep the tunnel serving the last good config; silently
+                    // dropping the reload would leave the user unaware their
+                    // edit never took effect.
+                    lastErrorMessage = "生成 TUN 配置失败，隧道仍在运行旧配置：\(error.localizedDescription)"
+                    return
+                }
                 do {
                     try await tunnelController.reload(configJSON: configJSON)
                     await applySelectedNodeViaClashAPI()
@@ -662,6 +690,9 @@ final class AppState: ObservableObject {
 
     /// Called on app termination and from the quit menu item.
     func shutdown() {
+        // Nothing left to reload into; a pending routing reload must not race
+        // the teardown below.
+        routingReloadDebouncer.cancel()
         if isSystemProxyEnabled {
             try? systemProxy.disable()
             isSystemProxyEnabled = false
@@ -1310,6 +1341,15 @@ final class AppState: ObservableObject {
     /// `setProxyMode` (which handles teardown/bring-up); this method ignores a
     /// `proxyMode` delta to avoid silently flipping modes without lifecycle
     /// handling.
+    ///
+    /// Reload semantics: persistence is always immediate. Port/binary-path
+    /// changes reconfigure the running core right away (their settings surface
+    /// commits once, on explicit save). A `routing` change instead arms
+    /// `routingReloadDebouncer`: routing surfaces commit per gesture (per
+    /// keystroke on the DNS page), so the reload fires only once the edits go
+    /// quiet, rebuilding from the then-current preferences. Preferences that
+    /// affect neither (delay-test URL, auto-update interval, …) never touch
+    /// the core.
     func updatePreferences(_ newPreferences: AppPreferences) async {
         let old = preferences
         guard old != newPreferences else { return }
@@ -1324,7 +1364,20 @@ final class AppState: ObservableObject {
             || old.clashAPIPort != newPreferences.clashAPIPort
             || old.singBoxBinaryPathOverride != newPreferences.singBoxBinaryPathOverride
         if coreAffecting {
+            // The immediate reload rebuilds the config from the live
+            // preferences, which already carries any routing delta from this
+            // same update; drop a pending debounced reload rather than
+            // restarting twice.
+            routingReloadDebouncer.cancel()
             await reconfigureRunningProxy()
+        } else if old.routing != newPreferences.routing, isProxyActive {
+            // Only owed while something is running: a core brought up later
+            // always starts from the latest persisted preferences. The fire
+            // re-checks the live state, so a proxy stopped inside the window
+            // makes this a no-op.
+            routingReloadDebouncer.schedule { [weak self] in
+                await self?.reconfigureRunningProxy()
+            }
         }
     }
 
@@ -1680,6 +1733,10 @@ extension AppState: ProfileManaging {
         let target = activated.active
 
         await runSerializedLifecycle { [self] in
+            // The profile swap below applies the target profile's preferences
+            // (routing included) wholesale; a routing reload still pending for
+            // the previous profile is obsolete.
+            routingReloadDebouncer.cancel()
             // Was the *previous* profile's mode serving traffic? Read this
             // before reassigning `preferences`, since `isProxyActive` keys off
             // the current mode.
