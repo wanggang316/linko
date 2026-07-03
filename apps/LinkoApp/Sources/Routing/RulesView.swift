@@ -280,11 +280,19 @@ struct RulesView: View {
     /// Persistence is immediate; when the core is running, `AppState` reloads
     /// it after a short debounce window, so a burst of edits (reorder, batch
     /// delete, import) lands as a single reload carrying the final routing.
+    ///
+    /// The preferences snapshot is taken inside the task — in the same
+    /// main-actor turn as `updatePreferences`, which has no suspension between
+    /// reading and writing `preferences` — so a commit can never build on a
+    /// state another turn has since replaced (same pattern as the quick-add
+    /// window's save).
     private func commit(_ newRouting: RoutingConfig) {
-        var preferences = appState.preferences
-        guard preferences.routing != newRouting else { return }
-        preferences.routing = newRouting
-        Task { await appState.updatePreferences(preferences) }
+        Task {
+            var preferences = appState.preferences
+            guard preferences.routing != newRouting else { return }
+            preferences.routing = newRouting
+            await appState.updatePreferences(preferences)
+        }
     }
 }
 
