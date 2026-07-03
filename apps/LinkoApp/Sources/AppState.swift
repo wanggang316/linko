@@ -95,7 +95,7 @@ final class AppState: ObservableObject {
     private let loginItem: LoginItemControlling
     private let makeClashAPI: (URL) -> ClashAPIProviding
     /// TUN global mode controller (NetworkExtension). Only used in `.tun` mode.
-    let tunnelController: TunnelController
+    let tunnelController: any TunnelControlling
     /// Mirrors `tunnelController.status` into `tunnelStatus`.
     private var tunnelStatusObservation: AnyCancellable?
 
@@ -230,7 +230,7 @@ final class AppState: ObservableObject {
         // Mirror the TUN tunnel status into our published mirror, and react to
         // an extension-side disconnect (sleep/wake, manual stop, crash) so the
         // UI and `isSystemProxyEnabled` flag stay truthful in `.tun` mode.
-        tunnelStatusObservation = tunnelController.$status
+        tunnelStatusObservation = tunnelController.statusPublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] status in
                 guard let self else { return }
