@@ -148,18 +148,18 @@ struct PolicyGroupsView: View {
 
     // MARK: - Derived
 
-    /// Node "tags" for the member picker. Display names map to outbound tags
-    /// one-to-one for the common case of unique node names; duplicates are
-    /// surfaced as warnings by the engine's `validate`.
+    /// Node tags for the member picker: the builder-assigned outbound tags,
+    /// deduplicated exactly as the generated config will name them. Members
+    /// therefore always reference a real outbound — e.g. a node display-named
+    /// "reject" is offered (and stored) as "reject-2", never the reserved
+    /// literal, so the group can't silently lose it and degrade to "direct".
     private var nodeTags: [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for node in appState.allNodes where !seen.contains(node.name) {
-            seen.insert(node.name)
-            result.append(node.name)
-        }
-        return result
+        Self.tagBuilder.outboundTags(for: appState.allNodes)
     }
+
+    /// A stateless tag resolver shared across renders; `outboundTags(for:)` is
+    /// a pure function of its input, so a single instance is safe and cheap.
+    private static let tagBuilder = SingBoxConfigBuilder()
 
     // MARK: - Mutations
 
@@ -322,8 +322,16 @@ private struct PolicyGroupEditorSheet: View {
 
     @State private var originalName: String = ""
 
+    /// A group tagged with any spelling of the built-in reject action would be
+    /// unreferenceable: the engine resolves such targets to the reject action
+    /// case-insensitively before ever looking the group up. "direct" keeps its
+    /// historical exact-match rule.
+    private var nameIsReservedReject: Bool {
+        BuiltinReject.matches(trimmedName)
+    }
+
     private var canSave: Bool {
-        !trimmedName.isEmpty && !nameConflict && trimmedName != "direct"
+        !trimmedName.isEmpty && !nameConflict && trimmedName != "direct" && !nameIsReservedReject
     }
 
     var body: some View {
@@ -378,6 +386,11 @@ private struct PolicyGroupEditorSheet: View {
                     .foregroundStyle(Theme.Color.warning)
             } else if trimmedName == "direct" {
                 Label("名称不能为保留字 “direct”。", systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.warning)
+            } else if nameIsReservedReject {
+                Label("名称不能为保留字 “reject”（不区分大小写，含 REJECT-DROP 等变体）。",
+                      systemImage: "exclamationmark.triangle.fill")
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Color.warning)
             }

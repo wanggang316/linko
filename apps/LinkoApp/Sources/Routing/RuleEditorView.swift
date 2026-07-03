@@ -178,8 +178,11 @@ struct RuleEditorView: View {
     private var targetSection: some View {
         Section {
             Menu {
+                // FINAL folds into route.final, which must name a real
+                // outbound — the built-in reject action is rule-only.
                 TargetMenuItems(
                     targets: targets,
+                    allowsReject: !draft.type.isFinal,
                     selectedTag: draft.target,
                     onSelect: { draft.target = $0 }
                 )
@@ -206,10 +209,19 @@ struct RuleEditorView: View {
         } header: {
             Text("出站目标")
         } footer: {
-            Text("命中此规则的流量将转发到所选节点或策略组。")
+            Text(targetFooterText)
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Color.secondaryLabel)
         }
+    }
+
+    /// Footer copy for the target section: rejecting targets don't forward
+    /// anything, so the generic "转发" wording would be misleading there.
+    private var targetFooterText: String {
+        if BuiltinReject.matches(draft.target) {
+            return "命中此规则的连接将被直接拒绝，不建立任何转发。"
+        }
+        return "命中此规则的流量将转发到所选节点或策略组。"
     }
 
     // MARK: - Footer
@@ -246,7 +258,9 @@ struct RuleEditorView: View {
             return draft.subRules.isEmpty ? "逻辑规则至少需要一个子条件" : nil
         }
         if draft.type.isFinal {
-            return nil
+            // Guards legacy rules that arrive already FINAL+reject; the menu
+            // and `normalize(for:)` prevent composing that state in the editor.
+            return BuiltinReject.matches(draft.target) ? "兜底规则不能使用拒绝目标" : nil
         }
         if draft.value.trimmingCharacters(in: .whitespaces).isEmpty {
             return draft.type.usesRuleSet ? "请选择规则集" : "请输入匹配值"
@@ -258,12 +272,19 @@ struct RuleEditorView: View {
 
     /// Resets fields that don't apply to a newly chosen type so a switch from,
     /// say, a leaf matcher to a logical one (or vice versa) leaves no stale data.
+    /// Switching to FINAL also resets a reject target — FINAL cannot reject, and
+    /// the stale target would otherwise bypass the menu's gating.
     private func normalize(for newType: RuleType) {
         if newType.isLogical {
             draft.value = ""
         } else {
             draft.subRules = []
-            if newType.isFinal { draft.value = "" }
+            if newType.isFinal {
+                draft.value = ""
+                if BuiltinReject.matches(draft.target) {
+                    draft.target = targets.defaultTag
+                }
+            }
         }
     }
 

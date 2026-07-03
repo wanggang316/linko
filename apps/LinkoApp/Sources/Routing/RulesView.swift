@@ -412,7 +412,8 @@ private struct FinalTargetMenu: View {
 
     var body: some View {
         Menu {
-            TargetMenuItems(targets: targets, selectedTag: currentTag, onSelect: onSelect)
+            // route.final must name a real outbound; the reject action is not one.
+            TargetMenuItems(targets: targets, allowsReject: false, selectedTag: currentTag, onSelect: onSelect)
         } label: {
             HStack(spacing: Theme.Spacing.xxs) {
                 Image(systemName: "flag.checkered")
@@ -432,13 +433,16 @@ private struct FinalTargetMenu: View {
 
 /// Shared, grouped menu content for choosing an outbound target (built-ins,
 /// groups, nodes). Reused by the final-target menu and the rule editor.
+/// `allowsReject` gates the built-in reject action: only rule targets may
+/// offer it — `route.final` and anything needing a real outbound must not.
 struct TargetMenuItems: View {
     let targets: RoutingTargets
+    let allowsReject: Bool
     let selectedTag: String
     let onSelect: (String) -> Void
 
     var body: some View {
-        section("内置", items: targets.builtins)
+        section("内置", items: allowsReject ? targets.builtins : targets.routableBuiltins)
         if !targets.groups.isEmpty {
             Divider()
             section("策略组", items: targets.groups)
@@ -456,7 +460,7 @@ struct TargetMenuItems: View {
                 Button {
                     onSelect(target.tag)
                 } label: {
-                    if target.tag == selectedTag {
+                    if isSelected(target) {
                         Label(target.displayName, systemImage: "checkmark")
                     } else {
                         Text(target.displayName)
@@ -464,6 +468,14 @@ struct TargetMenuItems: View {
                 }
             }
         }
+    }
+
+    /// Exact tag match, except reject: legacy rules may store any casing or
+    /// Surge variant (REJECT, reject-drop, …), all of which the engine — and
+    /// therefore this menu — treats as the one built-in reject item.
+    private func isSelected(_ target: RoutingTarget) -> Bool {
+        if target.tag == selectedTag { return true }
+        return BuiltinReject.matches(target.tag) && BuiltinReject.matches(selectedTag)
     }
 }
 

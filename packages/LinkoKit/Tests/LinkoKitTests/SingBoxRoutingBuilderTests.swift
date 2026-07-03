@@ -635,6 +635,18 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
 
     // MARK: - REJECT targets (sing-box 1.11+ reject action)
 
+    func testBuiltinRejectPredicateContract() {
+        // Public API contract relied on by the app's routing UI: every casing
+        // and Surge variant matches; near-misses and deduplicated node tags
+        // ("reject-2") must not.
+        for tag in ["reject", "REJECT", "Reject", "REJECT-DROP", "reject-tinygif", "Reject-No-Drop"] {
+            XCTAssertTrue(BuiltinReject.matches(tag), tag)
+        }
+        for tag in ["reject-2", "rejected", "reject drop", "direct", "proxy", ""] {
+            XCTAssertFalse(BuiltinReject.matches(tag), tag)
+        }
+    }
+
     func testRejectRuleEmitsRejectActionWithoutOutbound() throws {
         // Every casing and Surge variant maps onto the built-in reject action.
         let spellings = ["reject", "REJECT", "Reject", "REJECT-DROP", "REJECT-TINYGIF", "REJECT-NO-DROP"]

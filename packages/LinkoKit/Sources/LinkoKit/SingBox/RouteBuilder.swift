@@ -9,13 +9,16 @@ import Foundation
 /// Matching is case-insensitive and covers Surge's REJECT variants
 /// (REJECT-DROP / REJECT-TINYGIF / REJECT-NO-DROP), which all degrade to the
 /// plain reject action.
-enum BuiltinReject {
+///
+/// Public so the app's routing UI reuses the exact engine predicate (target
+/// pickers, name validation, rendering) instead of duplicating it.
+public enum BuiltinReject {
     private static let aliases: Set<String> = [
         "reject", "reject-drop", "reject-tinygif", "reject-no-drop",
     ]
 
     /// `true` when `tag` names the built-in reject target (any casing/variant).
-    static func matches(_ tag: String) -> Bool {
+    public static func matches(_ tag: String) -> Bool {
         aliases.contains(tag.lowercased())
     }
 }
