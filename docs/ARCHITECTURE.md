@@ -79,6 +79,29 @@ order: user override path → `vendor/sing-box/sing-box` (repo dev) →
 `/opt/homebrew/bin/sing-box` → `/usr/local/bin/sing-box`; if none is found the
 UI points at `scripts/fetch-singbox.sh` or `brew install sing-box`.
 
+## Routing semantics established in plan add-rule-for-current-page (M1)
+
+- **Reject targets are a rule action, not an outbound.** sing-box 1.11+ models
+  reject as `{action: "reject"}` with no `outbound` key. `BuiltinReject`
+  (`packages/LinkoKit/Sources/LinkoKit/SingBox/RouteBuilder.swift`, public) is
+  the single predicate for reject-target detection — case-insensitive,
+  covering Surge's REJECT-DROP / REJECT-TINYGIF / REJECT-NO-DROP variants. UI
+  and import layers must reuse it instead of re-matching strings. `reject` is
+  a reserved node tag (deduplicated case-insensitively); `route.final`, group
+  members, and detours must never carry it (the builder falls back with a
+  validate() warning; DNS server *tags* are an exempt namespace).
+- **Routing edits reload the running core through a debounce.**
+  `AppState.updatePreferences` arms a 1.2s trailing-edge `Debouncer`
+  (LinkoKit) on a `routing` diff; persistence is always immediate, only the
+  core reload coalesces. Port/binary-path deltas reload immediately and
+  cancel a pending routing reload; mode/profile switches and shutdown cancel
+  it too. Non-preferences reload paths (node edits) are never debounced.
+- **App-layer unit tests are host-free.** `apps/LinkoApp/Tests` compiles into
+  the LinkoAppTests bundle together with the app sources (no Linko.app test
+  host — the LSUIElement launch path would resume the developer's real proxy
+  session). Run via `make test-app`; system effects stay behind the
+  `AppDependencies` protocols (e.g. `TunnelControlling`).
+
 ## Milestone 2 plan: NetworkExtension / TUN (not in current scope)
 
 Replaces the system-proxy approach with an enhanced (TUN) mode so that all
