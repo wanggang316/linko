@@ -759,6 +759,25 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertTrue(warnings.contains { $0.contains("Ad Block") && $0.contains("REJECT") }, "\(warnings)")
     }
 
+    func testGroupNamedAfterBuiltinRejectIsFlaggedByName() throws {
+        // A pre-existing group sharing the reject action's name is shadowed:
+        // rules naming it compile to the built-in reject, never the group.
+        // validate() must call the group out by name so the user can rename.
+        let routing = RoutingConfig(
+            groups: [PolicyGroup(name: "REJECT", members: [.node("A")])]
+        )
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(
+            warnings.contains { $0.contains("REJECT") && $0.contains("同名") && $0.contains("重命名") },
+            "\(warnings)"
+        )
+
+        // Ordinary group names stay unflagged.
+        let clean = RoutingConfig(groups: [PolicyGroup(name: "Media", members: [.node("A")])])
+        let cleanWarnings = try builder.validate(nodes: [ssNode("A")], routing: clean)
+        XCTAssertFalse(cleanWarnings.contains { $0.contains("同名") }, "\(cleanWarnings)")
+    }
+
     func testRejectDownloadDetourFallsBackToDirectWithWarning() throws {
         let routing = RoutingConfig(
             rules: [RoutingRule(type: .geosite, value: "geosite-ads", target: "REJECT")],

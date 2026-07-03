@@ -85,7 +85,12 @@ struct RoutingTargets {
         }
 
         self.nodes = zip(nodeList, nodeTags).map { node, tag in
-            RoutingTarget(kind: .node, tag: tag, displayName: node.name)
+            // Tags equal names except when the builder deduplicated a
+            // collision (a node literally named "reject" becomes "reject-2").
+            // Display the tag whenever it diverges: showing the raw name
+            // would render such a node indistinguishable from the built-in
+            // reject item (or from its same-named sibling) in the menus.
+            RoutingTarget(kind: .node, tag: tag, displayName: tag == node.name ? node.name : tag)
         }
     }
 

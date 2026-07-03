@@ -306,6 +306,14 @@ final class AppState: ObservableObject {
             // Re-check: a queued restart/toggle may have changed the state by
             // the time this operation runs.
             guard enabled != isProxyActive else { return }
+            if !enabled {
+                // The core is going down: a routing reload still pending in
+                // the debounce window has nothing to reload into, and a quick
+                // re-enable inside the window would otherwise pay a redundant
+                // restart right after the fresh start (which already builds
+                // from the latest preferences).
+                routingReloadDebouncer.cancel()
+            }
             await applyProxy(enabled: enabled)
         }
         // Remember the user's resulting on/off choice so the next launch can
@@ -479,9 +487,12 @@ final class AppState: ObservableObject {
     /// when nothing is active.
     ///
     /// - `.systemProxy`: restarts the sing-box subprocess (the M1 behavior).
-    /// - `.tun`: hot-reloads the running tunnel in place via the extension's
-    ///   `handleAppMessage`; on reload failure it falls back to a full
-    ///   stop/start of the tunnel so the user is never left on a stale config.
+    /// - `.tun`: pre-flight validates the rebuilt config (`sing-box check`;
+    ///   on failure the tunnel keeps serving the old config and the error is
+    ///   surfaced), then hot-reloads the running tunnel in place via the
+    ///   extension's `handleAppMessage`; on reload failure it falls back to a
+    ///   full stop/start of the tunnel so the user is never left on a stale
+    ///   config.
     private func reconfigureRunningProxy() async {
         switch preferences.proxyMode {
         case .systemProxy:
@@ -492,8 +503,9 @@ final class AppState: ObservableObject {
                 let nodes = allNodes
                 guard !nodes.isEmpty else { return }
                 let configJSON: String
+                let configData: Data
                 do {
-                    let configData = try buildTunConfig(nodes: nodes)
+                    configData = try buildTunConfig(nodes: nodes)
                     guard let json = String(data: configData, encoding: .utf8) else {
                         lastErrorMessage = "TUN 配置编码失败，隧道仍在运行旧配置。"
                         return
@@ -506,8 +518,42 @@ final class AppState: ObservableObject {
                     lastErrorMessage = "生成 TUN 配置失败，隧道仍在运行旧配置：\(error.localizedDescription)"
                     return
                 }
+                // PRE-FLIGHT VALIDATION (mirrors startTunnel): a config that
+                // fails `sing-box check` must never reach the running tunnel.
+                // Without this, a bad routing edit would ride reload →
+                // in-extension restart failure → fallback stop/start → the
+                // start pre-flight refusing it, tearing the whole tunnel
+                // down. Validating here keeps the old config serving instead.
+                // The check targets a temp file so the on-disk config (the
+                // one the user can inspect) never holds a rejected build.
+                guard let binaryURL = locateSingBoxBinary() else {
+                    lastErrorMessage = "未找到 sing-box：TUN 配置校验需要核心二进制，隧道仍在运行旧配置。"
+                    return
+                }
+                do {
+                    let tempConfigURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("linko-reload-check-\(UUID().uuidString).json")
+                    try configData.write(to: tempConfigURL, options: .atomic)
+                    defer { try? FileManager.default.removeItem(at: tempConfigURL) }
+                    // Off the main actor: the checker blocks on a subprocess.
+                    let validator = configValidator
+                    let validation = await Task.detached {
+                        validator.validate(configFileURL: tempConfigURL, binaryURL: binaryURL)
+                    }.value
+                    guard validation.isValid else {
+                        lastErrorMessage = "TUN 配置校验未通过，隧道仍在运行旧配置：\(validation.errorSummary)"
+                        return
+                    }
+                } catch {
+                    lastErrorMessage = "TUN 配置校验失败，隧道仍在运行旧配置：\(error.localizedDescription)"
+                    return
+                }
                 do {
                     try await tunnelController.reload(configJSON: configJSON)
+                    // The running config is fresh again: clear any stale
+                    // reload complaint (e.g. a pre-flight rejection the user
+                    // just fixed), mirroring the restart path's entry clear.
+                    lastErrorMessage = nil
                     await applySelectedNodeViaClashAPI()
                 } catch {
                     // Reload failed; fall back to a clean restart of the tunnel.
@@ -1370,11 +1416,17 @@ final class AppState: ObservableObject {
             // restarting twice.
             routingReloadDebouncer.cancel()
             await reconfigureRunningProxy()
-        } else if old.routing != newPreferences.routing, isProxyActive {
+        } else if old.routing != newPreferences.routing, isProxyActive || isSwitchingProxy {
             // Only owed while something is running: a core brought up later
-            // always starts from the latest persisted preferences. The fire
-            // re-checks the live state, so a proxy stopped inside the window
-            // makes this a no-op.
+            // always starts from the latest persisted preferences.
+            // `isSwitchingProxy` matters: while a restart/reload is in flight
+            // (e.g. a previous debounced fire's own restart window)
+            // `isProxyActive` briefly reads false, and a routing edit landing
+            // inside that window would otherwise be dropped silently —
+            // persisted, but the core left serving the old config. Arming is
+            // safe either way: the fire's `reconfigureRunningProxy` joins the
+            // serialized lifecycle chain behind the in-flight operation, and
+            // its internal guards make a genuinely stopped proxy a no-op.
             routingReloadDebouncer.schedule { [weak self] in
                 await self?.reconfigureRunningProxy()
             }

@@ -47,9 +47,7 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
 
     /// Bundle ids of the browsers this reader can script, for callers that
     /// gate UI on browser support without invoking the reader.
-    public static var supportedBundleIDs: Set<String> {
-        Set(SupportedBrowser.allCases.map(\.rawValue))
-    }
+    public static let supportedBundleIDs = Set(SupportedBrowser.allCases.map(\.rawValue))
 
     private let shell: ShellRunning
     private let timeout: TimeInterval
@@ -104,13 +102,18 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
     /// error: script output can embed the page URL and must never reach a
     /// description or a log line.
     private static func classifyFailure(stderr: String, browserName: String) -> BrowserPageReadError {
-        if stderr.contains("-1743") || stderr.contains("-10004") {
+        // osascript terminates each Apple event failure line with the code in
+        // parentheses — "execution error: … (-1743)" — so matching the
+        // parenthesized form can't be fooled by a bare digit run embedded in
+        // the error's free text.
+        if stderr.contains("(-1743)") || stderr.contains("(-10004)") {
             // errAEEventNotPermitted / privilege violation: the user declined
             // (or a management profile blocks) the Automation TCC prompt.
             return .permissionDenied(browserName: browserName)
         }
-        if stderr.contains("-1719") {
-            // errAEIllegalIndex: `front window` does not exist.
+        if stderr.contains("(-1719)") || stderr.contains("(-1728)") {
+            // errAEIllegalIndex / errAENoSuchObject: `front window` does not
+            // exist — browsers report the missing window either way.
             return .noWindow(browserName: browserName)
         }
         return .scriptFailed(browserName: browserName)

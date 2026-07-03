@@ -45,6 +45,13 @@ public final class Debouncer {
         self.sleep = sleep
     }
 
+    deinit {
+        // The pending task only holds `self` weakly, so a debouncer can be
+        // dropped with its window still open; the orphaned action must not
+        // fire into a dead owner.
+        pending?.cancel()
+    }
+
     /// Whether an action is waiting for its quiet window to elapse.
     public var isPending: Bool { pending != nil }
 

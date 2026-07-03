@@ -79,6 +79,22 @@ final class DebouncerTests: XCTestCase {
         XCTAssertEqual(fireCount, 0)
     }
 
+    func testDeinitCancelsThePendingAction() async {
+        let gate = SleepGate()
+        var fireCount = 0
+        var debouncer: Debouncer? = Debouncer(quietWindow: 1) { _ in try await gate.sleep() }
+
+        debouncer?.schedule { fireCount += 1 }
+        await waitUntil { gate.inFlight == 1 }
+
+        // The pending task holds its owner weakly, so dropping the debouncer
+        // deallocates it mid-window; deinit must cancel the orphaned action.
+        debouncer = nil
+        gate.releaseAll()
+        await drain()
+        XCTAssertEqual(fireCount, 0)
+    }
+
     func testCancelWithNothingPendingIsANoOp() {
         let debouncer = Debouncer(quietWindow: 1) { _ in }
         debouncer.cancel()

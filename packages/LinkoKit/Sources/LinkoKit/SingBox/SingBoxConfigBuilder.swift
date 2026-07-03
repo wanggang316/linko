@@ -81,6 +81,13 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
         // Group membership + nesting cycles.
         for group in routing.groups {
+            // A group sharing the built-in reject action's name (any casing /
+            // Surge variant) is shadowed: rules naming it compile to the
+            // reject action, never to the group outbound. Pre-existing
+            // configs may still carry such a group, so call it out by name.
+            if BuiltinReject.matches(group.name) {
+                warnings.append("策略组 “\(group.name)” 与内置拒绝目标同名，引用它的规则将按内置拒绝处理，请重命名该策略组。")
+            }
             for member in group.members {
                 switch member.kind {
                 case .node, .builtin:
