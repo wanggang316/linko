@@ -276,9 +276,10 @@ struct RulesView: View {
         importSummary = summary
     }
 
-    /// Persists a mutated routing config through the standard preferences path,
-    /// which restarts the core when it is running so the new routing takes
-    /// effect immediately.
+    /// Persists a mutated routing config through the standard preferences path.
+    /// Persistence is immediate; when the core is running, `AppState` reloads
+    /// it after a short debounce window, so a burst of edits (reorder, batch
+    /// delete, import) lands as a single reload carrying the final routing.
     private func commit(_ newRouting: RoutingConfig) {
         var preferences = appState.preferences
         guard preferences.routing != newRouting else { return }
