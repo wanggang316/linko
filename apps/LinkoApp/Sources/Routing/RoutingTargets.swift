@@ -26,7 +26,10 @@ struct RoutingTarget: Identifiable, Hashable {
 
     var symbolName: String {
         switch kind {
-        case .builtin: return tag == "direct" ? "arrow.up.forward" : "bolt.horizontal.circle"
+        case .builtin:
+            if tag == "direct" { return "arrow.up.forward" }
+            if BuiltinReject.matches(tag) { return "nosign" }
+            return "bolt.horizontal.circle"
         case .group: return "rectangle.3.group"
         case .node: return "point.topleft.down.to.point.bottomright.curvepath"
         }
@@ -69,6 +72,12 @@ struct RoutingTargets {
                 )
             )
         }
+        // The built-in reject action (sing-box 1.11+): a legal *rule* target,
+        // never a legal final/detour/group member. Kept last so `defaultTag`'s
+        // `all.first` fallback can only ever land on "direct".
+        builtinTargets.append(
+            RoutingTarget(kind: .builtin, tag: "reject", displayName: Self.rejectDisplayName)
+        )
         self.builtins = builtinTargets
 
         self.groups = routing.groups.map { group in
@@ -80,11 +89,23 @@ struct RoutingTargets {
         }
     }
 
+    /// Canonical display name for the built-in reject target, shared by the
+    /// catalogue entry and the resolution of legacy casing/variant forms.
+    private static let rejectDisplayName = "拒绝 (reject)"
+
     /// All targets in picker order: built-ins, then groups, then nodes.
     var all: [RoutingTarget] { builtins + groups + nodes }
 
+    /// Built-ins legal wherever a real outbound is required (`route.final`,
+    /// group members, detours): everything except the reject action, which
+    /// only rules may target.
+    var routableBuiltins: [RoutingTarget] {
+        builtins.filter { !BuiltinReject.matches($0.tag) }
+    }
+
     /// The default target to assign to a freshly created rule: the "proxy"
-    /// group if it exists, else the first available target.
+    /// group if it exists, else the first available target. Never reject:
+    /// "direct" always heads `builtins`, so the fallback lands there.
     var defaultTag: String {
         if let proxy = all.first(where: { $0.tag == PolicyGroup.defaultGroupName }) {
             return proxy.tag
@@ -92,19 +113,26 @@ struct RoutingTargets {
         return all.first?.tag ?? PolicyGroup.defaultGroupName
     }
 
-    /// Resolves a stored target tag into a presentable target. Unknown tags
-    /// (e.g. imported policy names that don't yet match any group/node) are
-    /// returned as a synthetic "unresolved" target so the row can flag them.
+    /// Resolves a stored target tag into a presentable target. Legacy reject
+    /// spellings (REJECT, reject-drop, …) resolve to the built-in reject
+    /// presentation — the engine matches them case-insensitively — keeping
+    /// the stored tag intact. Other unknown tags (e.g. imported policy names
+    /// that don't yet match any group/node) are returned as a synthetic
+    /// "unresolved" target so the row can flag them.
     func resolve(_ tag: String) -> RoutingTarget {
         if let known = all.first(where: { $0.tag == tag }) {
             return known
         }
+        if BuiltinReject.matches(tag) {
+            return RoutingTarget(kind: .builtin, tag: tag, displayName: Self.rejectDisplayName)
+        }
         return RoutingTarget(kind: .builtin, tag: tag, displayName: tag)
     }
 
-    /// `true` when `tag` matches a known node/group/built-in. Drives the
-    /// "unresolved target" warning glyph on imported rules.
+    /// `true` when `tag` matches a known node/group/built-in, or any spelling
+    /// of the built-in reject action (which the engine resolves regardless of
+    /// casing/variant). Drives the "unresolved target" warning glyph.
     func isResolved(_ tag: String) -> Bool {
-        all.contains { $0.tag == tag }
+        BuiltinReject.matches(tag) || all.contains { $0.tag == tag }
     }
 }
