@@ -7,6 +7,11 @@ import Foundation
 /// frontmost tab as `current tab`, the Chromium family (Chrome, Edge, Arc,
 /// Brave) as `active tab`. Browsers are addressed by bundle id, so localized
 /// or renamed app bundles keep working.
+///
+/// Reads are single-flight per bundle id (process-wide): while one osascript
+/// is still running — typically hung behind a pending Automation TCC prompt —
+/// further reads of the same browser fail fast with `.timedOut` instead of
+/// accumulating blocked osascript processes and worker threads.
 public struct OsascriptBrowserPageReader: BrowserPageReading {
     /// The browsers the reader knows how to script, keyed by bundle id.
     private enum SupportedBrowser: String, CaseIterable {
@@ -48,15 +53,25 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
 
     private let shell: ShellRunning
     private let timeout: TimeInterval
+    private let inFlight: InFlightRegistry
 
     /// - Parameter timeout: upper bound on how long a single read may take.
     ///   The 1s default keeps callers (e.g. a menu about to open) snappy. A
     ///   pending Automation TCC consent prompt blocks osascript until the
     ///   user answers, so callers expecting the first-ever prompt must
-    ///   coordinate a longer timeout themselves.
+    ///   coordinate a longer timeout themselves. While such a read is still
+    ///   running, further reads of the same browser fail fast with
+    ///   `.timedOut` instead of stacking more blocked osascript processes.
     public init(shell: ShellRunning = ProcessShellRunner(), timeout: TimeInterval = 1.0) {
+        self.init(shell: shell, timeout: timeout, inFlight: .shared)
+    }
+
+    /// Test seam: isolates the in-flight registry so concurrency tests never
+    /// leak single-flight state across cases.
+    init(shell: ShellRunning, timeout: TimeInterval, inFlight: InFlightRegistry) {
         self.shell = shell
         self.timeout = timeout
+        self.inFlight = inFlight
     }
 
     public func currentPageURL(browserBundleID: String) throws -> String {
@@ -64,7 +79,7 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
             throw BrowserPageReadError.unsupportedBrowser(bundleID: browserBundleID)
         }
 
-        let result = try run(script: browser.script, browserName: browser.displayName)
+        let result = try run(script: browser.script, browser: browser)
         guard result.exitCode == 0 else {
             throw Self.classifyFailure(
                 stderr: result.standardError,
@@ -101,6 +116,35 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
         return .scriptFailed(browserName: browserName)
     }
 
+    // MARK: - Single flight
+
+    /// Tracks which browsers currently have an osascript read running, so
+    /// concurrent reads of the same browser can fail fast. Shared
+    /// process-wide by default: readers are cheap value types created ad
+    /// hoc, but the guarded resource — one (possibly TCC-prompt-blocked)
+    /// osascript per browser — is per-process.
+    final class InFlightRegistry: @unchecked Sendable {
+        static let shared = InFlightRegistry()
+
+        private let lock = NSLock()
+        private var bundleIDs: Set<String> = []
+
+        /// Claims the slot for `bundleID`; `false` when a read is already
+        /// running.
+        func begin(_ bundleID: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return bundleIDs.insert(bundleID).inserted
+        }
+
+        /// Releases the slot for `bundleID`.
+        func end(_ bundleID: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            bundleIDs.remove(bundleID)
+        }
+    }
+
     // MARK: - Timeout plumbing
 
     /// Runs osascript on a background queue and gives up after `timeout`.
@@ -108,15 +152,30 @@ public struct OsascriptBrowserPageReader: BrowserPageReading {
     /// `ShellRunning` is synchronous, so a timed-out run keeps blocking its
     /// worker thread until the real osascript exits; that is acceptable for
     /// the short-lived osascript and keeps the injection seam mockable.
-    private func run(script: String, browserName: String) throws -> ShellResult {
+    ///
+    /// Reads are single-flight per browser: while one osascript for a bundle
+    /// id is still running (typically hung behind a pending Automation TCC
+    /// prompt), further reads fail fast with `.timedOut` instead of spawning
+    /// another blocked process and parking another worker thread. The slot is
+    /// released by the worker when the shell call actually returns — not when
+    /// the caller times out — so the guard holds for the process's whole life.
+    private func run(script: String, browser: SupportedBrowser) throws -> ShellResult {
+        let browserName = browser.displayName
+        guard inFlight.begin(browser.rawValue) else {
+            throw BrowserPageReadError.timedOut(browserName: browserName)
+        }
+
         let box = OutcomeBox()
         let finished = DispatchSemaphore(value: 0)
         let shell = self.shell
+        let inFlight = self.inFlight
+        let bundleID = browser.rawValue
 
         DispatchQueue.global(qos: .userInitiated).async {
             box.outcome = Result {
                 try shell.run(executablePath: Self.osascriptPath, arguments: ["-e", script])
             }
+            inFlight.end(bundleID)
             finished.signal()
         }
 

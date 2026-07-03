@@ -71,6 +71,11 @@ public enum DomainCandidateOutcome: Hashable, Sendable {
 
 /// Why an input produced no candidates. Failure is always distinguishable
 /// from success — a successful outcome is never empty.
+///
+/// Payload discipline (mirrors `BrowserPageReadError`): associated values
+/// carry only a category — a scheme or a static shape description — never
+/// the authority, host, or any other substring derived from the input URL,
+/// so an error can reach a log line without leaking where the user browsed.
 public enum DomainCandidateError: Error, Hashable, Sendable {
     /// The input is empty or whitespace-only.
     case emptyInput
@@ -80,9 +85,11 @@ public enum DomainCandidateError: Error, Hashable, Sendable {
     case missingHost
     /// The authority is malformed: a non-numeric port (`about:blank` lands
     /// here — `blank` fails the port test), userinfo in schemeless input, or
-    /// unbalanced IPv6 brackets.
+    /// unbalanced IPv6 brackets. The payload is a fixed reason string, never
+    /// a fragment of the input.
     case malformedAuthority(String)
-    /// The host is neither a valid domain name nor an IP literal.
+    /// The host is neither a valid domain name nor an IP literal. The
+    /// payload is a fixed shape description, never the host itself.
     case invalidHost(String)
 }
 
@@ -100,8 +107,10 @@ public enum DomainCandidateError: Error, Hashable, Sendable {
 ///
 /// Candidates only depend on the host. Hosts are lowercased, FQDN trailing
 /// dots stripped, and IDN labels punycode-encoded, so a Unicode host and its
-/// ACE form produce identical results. Dotted all-numeric hosts must be valid
-/// IPv4 literals or fail.
+/// ACE form produce identical results. Dotted all-numeric hosts must be
+/// canonical IPv4 literals (no leading zeros) or fail. Hosts breaching the
+/// RFC 1035 length limits (63 bytes per label, 253 total, on the ASCII form)
+/// fail closed.
 public struct DomainCandidateParser {
     public init() {}
 
@@ -152,9 +161,13 @@ public struct DomainCandidateParser {
         return (scheme.lowercased(), input[range.upperBound...])
     }
 
-    /// The authority component: everything up to the first `/`, `?` or `#`.
+    /// The authority component: everything up to the first `/`, `?`, `#` or
+    /// `\`. WHATWG URL parsing treats a backslash like a slash in http(s)
+    /// URLs, so `http://evil.com\@good.com/` must derive `evil.com` — cutting
+    /// only at `/` would strip `evil.com\` as userinfo and derive the host the
+    /// browser never navigates to.
     private static func authority(of text: Substring) -> Substring {
-        text.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        text.prefix { $0 != "/" && $0 != "?" && $0 != "#" && $0 != "\\" }
     }
 
     private static func splitHostPort(
@@ -164,7 +177,7 @@ public struct DomainCandidateParser {
         var host = authority
         if let at = host.lastIndex(of: "@") {
             guard allowsUserInfo else {
-                return .failure(.malformedAuthority("userinfo is not allowed without a scheme: \(authority)"))
+                return .failure(.malformedAuthority("userinfo is not allowed without a scheme"))
             }
             host = host[host.index(after: at)...]
         }
@@ -173,16 +186,16 @@ public struct DomainCandidateParser {
         if host.hasPrefix("[") {
             // Bracketed IPv6: `[addr]` or `[addr]:port`.
             guard let close = host.firstIndex(of: "]") else {
-                return .failure(.malformedAuthority("unbalanced IPv6 brackets: \(authority)"))
+                return .failure(.malformedAuthority("unbalanced IPv6 brackets"))
             }
             let literal = host[host.index(after: host.startIndex)..<close].lowercased()
             let remainder = host[host.index(after: close)...]
             if !remainder.isEmpty {
                 guard remainder.first == ":", isNumericPort(remainder.dropFirst()) else {
-                    return .failure(.malformedAuthority("invalid text after IPv6 brackets: \(authority)"))
+                    return .failure(.malformedAuthority("invalid text after IPv6 brackets"))
                 }
             }
-            guard isValidIPv6(literal) else { return .failure(.invalidHost(String(host))) }
+            guard isValidIPv6(literal) else { return .failure(.invalidHost("invalid IPv6 literal")) }
             return .success(.ipv6(literal))
         }
 
@@ -190,14 +203,14 @@ public struct DomainCandidateParser {
         // can only be a bare IPv6 literal.
         if host.filter({ $0 == ":" }).count >= 2 {
             let literal = host.lowercased()
-            guard isValidIPv6(literal) else { return .failure(.invalidHost(String(host))) }
+            guard isValidIPv6(literal) else { return .failure(.invalidHost("invalid IPv6 literal")) }
             return .success(.ipv6(literal))
         }
 
         if let colon = host.lastIndex(of: ":") {
             let port = host[host.index(after: colon)...]
             guard isNumericPort(port) else {
-                return .failure(.malformedAuthority("non-numeric port \"\(port)\" in: \(authority)"))
+                return .failure(.malformedAuthority("non-numeric port"))
             }
             host = host[..<colon]
             guard !host.isEmpty else { return .failure(.missingHost) }
@@ -218,12 +231,14 @@ public struct DomainCandidateParser {
 
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.allSatisfy({ !$0.isEmpty }) else {
-            return .failure(.invalidHost(raw))
+            return .failure(.invalidHost("empty label"))
         }
 
         // A dotted all-numeric host must be a valid IPv4 literal or nothing.
         if labels.allSatisfy({ label in label.allSatisfy { $0.isASCII && $0.isNumber } }) {
-            guard let octets = ipv4Octets(labels) else { return .failure(.invalidHost(raw)) }
+            guard let octets = ipv4Octets(labels) else {
+                return .failure(.invalidHost("not a valid IPv4 literal"))
+            }
             let literal = octets.map(String.init).joined(separator: ".")
             return .success(.ip(DomainCandidate(kind: .ipCIDR, value: literal + "/32")))
         }
@@ -233,11 +248,22 @@ public struct DomainCandidateParser {
         var asciiLabels: [String] = []
         for label in labels {
             guard let ascii = asciiLabel(String(label)) else {
-                return .failure(.invalidHost(raw))
+                return .failure(.invalidHost("disallowed character in label"))
             }
             asciiLabels.append(ascii)
         }
         let asciiHost = asciiLabels.joined(separator: ".")
+
+        // RFC 1035 length limits, checked on the ASCII (wire) form: 63 octets
+        // per label, 253 for the full host. Oversized input fails closed — no
+        // resolver could ever match a rule derived from it, and passing it on
+        // would let hostile input smuggle arbitrary bulk into rule values.
+        guard asciiLabels.allSatisfy({ $0.utf8.count <= 63 }) else {
+            return .failure(.invalidHost("label longer than 63 bytes"))
+        }
+        guard asciiHost.utf8.count <= 253 else {
+            return .failure(.invalidHost("host longer than 253 bytes"))
+        }
 
         // Single-label hosts (localhost, nas) and hosts that are exactly a
         // public-suffix entry (co.uk) have no registrable domain: fall back to
@@ -303,14 +329,18 @@ public struct DomainCandidateParser {
 
     // MARK: - IP literals
 
-    /// The four octets of a dotted-quad IPv4 literal, or nil.
+    /// The four octets of a dotted-quad IPv4 literal, or nil. Each octet must
+    /// be the canonical decimal spelling (the round-trip check rejects
+    /// leading zeros, signs and non-decimal digits): WHATWG/inet_aton parse
+    /// `010` as octal, so accepting it decimally would derive a rule for an
+    /// address the browser never connects to.
     private static func ipv4Octets(_ labels: [Substring]) -> [Int]? {
         guard labels.count == 4 else { return nil }
         var octets: [Int] = []
         for label in labels {
             guard (1...3).contains(label.count),
-                  label.allSatisfy({ $0.isASCII && $0.isNumber }),
-                  let value = Int(label), value <= 255
+                  let value = Int(label), (0...255).contains(value),
+                  String(value) == label
             else { return nil }
             octets.append(value)
         }

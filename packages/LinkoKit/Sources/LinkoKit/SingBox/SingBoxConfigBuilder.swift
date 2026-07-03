@@ -31,9 +31,10 @@ public enum SingBoxConfigError: Error, Equatable, LocalizedError {
 /// from `routing.finalTarget`, and a `dns` block when `routing.dns.isEnabled`.
 public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
     /// Tags reserved for non-node outbounds; node tags must never collide
-    /// with these. "reject" is reserved because it names the built-in reject
-    /// rule action (sing-box 1.11+), matched case-insensitively by
-    /// `uniqueTag`; "proxy"/"direct" keep their historical exact-match rule.
+    /// with these. Anything `BuiltinReject.matches` (reject plus its Surge
+    /// variants, any casing) is additionally reserved by `uniqueTag`, because
+    /// those spellings name the built-in reject rule action (sing-box 1.11+);
+    /// "proxy"/"direct" keep their historical exact-match rule.
     private static let reservedTags: Set<String> = ["proxy", "direct", "reject"]
 
     private let outboundBuilder = OutboundBuilder()
@@ -397,14 +398,18 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
     /// Returns a tag for `name` that does not collide with reserved tags or
     /// previously assigned node tags, appending a numeric suffix when needed.
-    /// "reject" collides case-insensitively (it names the built-in reject rule
-    /// action, so a node tag spelled REJECT/Reject would shadow it); the other
-    /// reserved tags keep their historical exact-match behavior.
+    /// Collision with the built-in reject action uses the same predicate the
+    /// routing engine matches with (`BuiltinReject.matches`): a node tag
+    /// spelled REJECT/Reject or a Surge variant (REJECT-DROP / REJECT-TINYGIF
+    /// / REJECT-NO-DROP, any casing) would otherwise be shadowed — rules and
+    /// group members naming it compile to the reject action instead of
+    /// routing to the node. "proxy"/"direct" keep their historical
+    /// exact-match behavior.
     private func uniqueTag(for name: String, used: inout Set<String>) -> String {
         let base = name.isEmpty ? "node" : name
         var candidate = base
         var counter = 2
-        while used.contains(candidate) || candidate.lowercased() == "reject" {
+        while used.contains(candidate) || BuiltinReject.matches(candidate) {
             candidate = "\(base)-\(counter)"
             counter += 1
         }

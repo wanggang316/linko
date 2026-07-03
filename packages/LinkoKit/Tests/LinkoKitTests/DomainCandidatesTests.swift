@@ -204,6 +204,31 @@ final class DomainCandidatesTests: XCTestCase {
         XCTAssertEqual(ipCandidate("https://[2001:db8::1]:8080/path"), DomainCandidate(kind: .ipCIDR, value: "2001:db8::1/128"))
     }
 
+    func testNonCanonicalIPv4OctetsFailClosed() {
+        // WHATWG/inet_aton parse leading-zero octets as octal; interpreting
+        // them decimally would derive a rule for an address the browser
+        // never connects to, so non-canonical spellings fail.
+        XCTAssertNotNil(failure("010.8.8.8"))
+        XCTAssertNotNil(failure("http://010.8.8.8/"))
+        XCTAssertNotNil(failure("1.2.3.04"))
+        XCTAssertNotNil(failure("1.2.3.004"))
+        // The same canon applies to the IPv4 tail embedded in IPv6, which
+        // would otherwise emit an ip_cidr sing-box cannot parse.
+        XCTAssertNotNil(failure("::ffff:01.2.3.4"))
+        XCTAssertNotNil(failure("[::ffff:01.2.3.4]:443"))
+
+        // Canonical spellings keep parsing, including plain zeros.
+        XCTAssertEqual(ipCandidate("0.0.0.0"), DomainCandidate(kind: .ipCIDR, value: "0.0.0.0/32"))
+        XCTAssertEqual(
+            ipCandidate("255.255.255.255"),
+            DomainCandidate(kind: .ipCIDR, value: "255.255.255.255/32")
+        )
+        XCTAssertEqual(
+            ipCandidate("::ffff:1.2.3.4"),
+            DomainCandidate(kind: .ipCIDR, value: "::ffff:1.2.3.4/128")
+        )
+    }
+
     // MARK: - VAL-DOMAIN-008
 
     func testSingleLabelHostsYieldExactDomainCandidate() {
@@ -241,20 +266,44 @@ final class DomainCandidatesTests: XCTestCase {
     // MARK: - VAL-DOMAIN-010
 
     func testUnusualButValidHostsParse() {
-        // Longer than 253 characters still splits normally.
-        let label = String(repeating: "a", count: 61)
-        let host = ([label, label, label, label] + ["example", "com"]).joined(separator: ".")
-        XCTAssertGreaterThan(host.count, 253)
-        let long = domainCandidates("https://\(host)/")
-        XCTAssertEqual(long[0].value, "example.com")
-        XCTAssertEqual(long[1], DomainCandidate(kind: .host, value: host))
-
         XCTAssertEqual(domainCandidates("my-site.example.com")[1].value, "my-site.example.com")
         XCTAssertEqual(domainCandidates("123movies.com"), [
             DomainCandidate(kind: .suffix, value: "123movies.com"),
             DomainCandidate(kind: .keyword, value: "123movies"),
         ])
         XCTAssertEqual(domainCandidates("foo_bar.example.com")[1].value, "foo_bar.example.com")
+    }
+
+    func testOversizedHostsFailClosed() {
+        // RFC 1035 limits, checked on the ASCII form: a host over 253 bytes
+        // or any label over 63 bytes fails instead of splitting normally —
+        // no resolver could match such a rule.
+        let label61 = String(repeating: "a", count: 61)
+        let overlongHost = ([label61, label61, label61, label61] + ["example", "com"])
+            .joined(separator: ".")
+        XCTAssertGreaterThan(overlongHost.count, 253)
+        XCTAssertNotNil(failure("https://\(overlongHost)/"))
+        XCTAssertNotNil(failure(overlongHost))
+
+        let label64 = String(repeating: "a", count: 64)
+        XCTAssertNotNil(failure("\(label64).example.com"))
+
+        // Both limits are inclusive: a 63-byte label and a 253-byte host
+        // still parse.
+        let label63 = String(repeating: "a", count: 63)
+        XCTAssertEqual(
+            domainCandidates("\(label63).example.com")[1].value,
+            "\(label63).example.com"
+        )
+        let host253 = [label63, label63, label63, String(repeating: "a", count: 57), "com"]
+            .joined(separator: ".")
+        XCTAssertEqual(host253.count, 253)
+        XCTAssertEqual(domainCandidates(host253)[1].value, host253)
+
+        // The limit applies to the punycode (wire) form: 60 raw characters
+        // sit under 63, but their ACE encoding ("xn--" + 62 digits) does not.
+        let wideLabel = String(repeating: "例", count: 60)
+        XCTAssertNotNil(failure("\(wideLabel).example.com"))
     }
 
     // MARK: - VAL-DOMAIN-011
@@ -363,5 +412,44 @@ final class DomainCandidatesTests: XCTestCase {
         // Dotted all-numeric input is IPv4 or nothing.
         XCTAssertNotNil(failure("256.1.1.1"))
         XCTAssertNotNil(failure("1.2.3.4.5"))
+    }
+
+    func testBackslashTerminatesAuthorityLikeWHATWG() {
+        // WHATWG URL parsing treats `\` like `/` in http(s) URLs: the host
+        // here is evil.com. Cutting the authority only at `/` would strip
+        // "evil.com\" as userinfo and derive good.com — a rule for a site
+        // the browser never visited.
+        XCTAssertEqual(domainCandidates("http://evil.com\\@good.com/")[0].value, "evil.com")
+        XCTAssertEqual(
+            parser.parse("http://example.com\\some\\path"),
+            parser.parse("http://example.com/some/path")
+        )
+    }
+
+    // MARK: - Error payload discipline
+
+    func testFailurePayloadsNeverCarryURLDerivedData() {
+        // Error associated values carry only static categories — never the
+        // authority, host, port or any other fragment of the input — so an
+        // error can reach a log line without leaking where the user browsed.
+        let secret = "secret-host"
+        let failingInputs = [
+            "user:pass@\(secret).example.com",  // userinfo without a scheme
+            "http://[\(secret)::1/path",        // unbalanced IPv6 brackets
+            "http://[::1]\(secret)",            // invalid text after brackets
+            "\(secret).example.com:port",       // non-numeric port
+            "\(secret)!.example.com",           // disallowed host character
+            "\(secret)..example.com",           // empty label
+            "\(secret)::\(secret)::1",          // invalid IPv6 literal
+            "\(String(repeating: "a", count: 64)).\(secret).example.com", // oversized label
+        ]
+        for input in failingInputs {
+            guard case .failure(let error) = parser.parse(input) else {
+                XCTFail("expected failure for \(input)")
+                continue
+            }
+            let description = String(describing: error)
+            XCTAssertFalse(description.contains(secret), "\(input) leaked into: \(description)")
+        }
     }
 }
