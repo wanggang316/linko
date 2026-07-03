@@ -820,6 +820,33 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
                        ["reject-2", "REJECT-2", "Reject-2", "PROXY"])
     }
 
+    func testRejectVariantNodeNamesAreRenamedWithTheEnginePredicate() throws {
+        // Tag collision uses the same predicate the engine matches with
+        // (`BuiltinReject.matches`): a node named after a Surge reject
+        // variant would otherwise keep its tag while every rule or group
+        // member naming it compiles to the reject action — traffic silently
+        // rejected instead of routed through the node.
+        let nodes = [ssNode("REJECT-DROP"), ssNode("reject-tinygif"), ssNode("Reject-No-Drop")]
+        XCTAssertEqual(builder.outboundTags(for: nodes),
+                       ["REJECT-DROP-2", "reject-tinygif-2", "Reject-No-Drop-2"])
+    }
+
+    func testRenamedRejectVariantNodeResolvesAsGroupMember() throws {
+        // The renamed tag flows through group membership: it is a legitimate
+        // member (the predicate no longer shadows it) and resolves to the
+        // node's outbound without warnings.
+        let routing = RoutingConfig(
+            groups: [PolicyGroup(name: "Pick", type: .select, members: [.node("REJECT-DROP-2")])]
+        )
+        let config = try buildJSON(nodes: [ssNode("REJECT-DROP")], routing: routing)
+        let group = try outbound(tagged: "Pick", in: config)
+        XCTAssertEqual(group["outbounds"] as? [String], ["REJECT-DROP-2"])
+        XCTAssertNotNil(try outbound(tagged: "REJECT-DROP-2", in: config))
+
+        let warnings = try builder.validate(nodes: [ssNode("REJECT-DROP")], routing: routing)
+        XCTAssertTrue(warnings.isEmpty, "\(warnings)")
+    }
+
     func testUserRejectRuleCoexistsWithTunQuicReject() throws {
         var prefs = AppPreferences()
         prefs.proxyMode = .tun

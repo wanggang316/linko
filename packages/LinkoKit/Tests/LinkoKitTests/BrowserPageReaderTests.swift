@@ -42,7 +42,10 @@ private final class FakeShell: ShellRunning, @unchecked Sendable {
 
 final class BrowserPageReaderTests: XCTestCase {
     private func makeReader(shell: FakeShell, timeout: TimeInterval = 1.0) -> OsascriptBrowserPageReader {
-        OsascriptBrowserPageReader(shell: shell, timeout: timeout)
+        // Each reader gets an isolated in-flight registry: production shares
+        // a process-wide one, but tests must not leak single-flight state
+        // (e.g. a deliberately hung FakeShell) across cases.
+        OsascriptBrowserPageReader(shell: shell, timeout: timeout, inFlight: .init())
     }
 
     // MARK: - Dialect dispatch
@@ -215,6 +218,46 @@ final class BrowserPageReaderTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? BrowserPageReadError, .scriptFailed(browserName: "Arc"))
         }
+    }
+
+    // MARK: - Single flight
+
+    func testSecondReadForSameBrowserFailsFastWhileFirstIsInFlight() {
+        let shell = FakeShell()
+        shell.delay = 0.5
+        shell.response = ShellResult(
+            exitCode: 0, standardOutput: "https://example.com/\n", standardError: ""
+        )
+        let reader = makeReader(shell: shell, timeout: 0.05)
+
+        // The first read times out, but its osascript is still running.
+        XCTAssertThrowsError(try reader.currentPageURL(browserBundleID: "com.apple.Safari")) { error in
+            XCTAssertEqual(error as? BrowserPageReadError, .timedOut(browserName: "Safari"))
+        }
+
+        // A second read of the same browser fails fast — before spawning
+        // another osascript that would just stack behind the first.
+        XCTAssertThrowsError(try reader.currentPageURL(browserBundleID: "com.apple.Safari")) { error in
+            XCTAssertEqual(error as? BrowserPageReadError, .timedOut(browserName: "Safari"))
+        }
+        XCTAssertEqual(shell.invocations.count, 1, "the in-flight browser must not spawn a second osascript")
+
+        // Single flight is keyed by bundle id: a different browser still
+        // spawns its own read.
+        XCTAssertThrowsError(try reader.currentPageURL(browserBundleID: "com.google.Chrome"))
+        XCTAssertEqual(shell.invocations.count, 2)
+    }
+
+    func testCompletedReadReleasesTheSingleFlightSlot() throws {
+        let shell = FakeShell()
+        shell.response = ShellResult(
+            exitCode: 0, standardOutput: "https://example.com/a\n", standardError: ""
+        )
+        let reader = makeReader(shell: shell)
+
+        XCTAssertEqual(try reader.currentPageURL(browserBundleID: "com.apple.Safari"), "https://example.com/a")
+        XCTAssertEqual(try reader.currentPageURL(browserBundleID: "com.apple.Safari"), "https://example.com/a")
+        XCTAssertEqual(shell.invocations.count, 2, "a completed read must release its slot for the next one")
     }
 
     // MARK: - Privacy
