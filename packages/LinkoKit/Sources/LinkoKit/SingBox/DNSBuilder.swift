@@ -130,7 +130,11 @@ struct DNSBuilder {
             object["inet6_range"] = fakeIP.inet6Range
         }
 
-        if let detour = server.detour, !detour.isEmpty {
+        // The built-in reject is a rule action, not an outbound: a verbatim
+        // reject detour would be a fatal unknown-outbound reference, so it is
+        // dropped (validate() surfaces the warning). Server *tags* are a
+        // separate namespace — a server tagged "reject" passes through as-is.
+        if let detour = server.detour, !detour.isEmpty, !BuiltinReject.matches(detour) {
             object["detour"] = detour
         }
         if let strategy = server.strategy {

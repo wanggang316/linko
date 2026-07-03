@@ -1,5 +1,25 @@
 import Foundation
 
+/// The built-in reject target. sing-box 1.11+ models "reject" as a rule
+/// *action*, not an outbound, so rules targeting it compile to
+/// `{action: "reject"}` and the name must never appear in `outbounds[]`,
+/// group member arrays, `route.final`, or any detour (a verbatim "reject"
+/// there is a fatal unknown-outbound reference at core startup).
+///
+/// Matching is case-insensitive and covers Surge's REJECT variants
+/// (REJECT-DROP / REJECT-TINYGIF / REJECT-NO-DROP), which all degrade to the
+/// plain reject action.
+enum BuiltinReject {
+    private static let aliases: Set<String> = [
+        "reject", "reject-drop", "reject-tinygif", "reject-no-drop",
+    ]
+
+    /// `true` when `tag` names the built-in reject target (any casing/variant).
+    static func matches(_ tag: String) -> Bool {
+        aliases.contains(tag.lowercased())
+    }
+}
+
 /// Builds the policy-group outbounds (`selector`/`urltest`), the `route` block
 /// (`rules`, `rule_set`, `final`, `auto_detect_interface`), and surfaces the set
 /// of warnings produced while resolving rule/group targets.
@@ -28,6 +48,9 @@ struct RouteBuilder {
     private let routing: RoutingConfig
     /// All outbound tags that a rule/group/final may legitimately target:
     /// node tags + group names + reserved built-ins ("direct"/"proxy").
+    /// The built-in reject target is resolvable for *rules* too, but is
+    /// matched separately via `BuiltinReject` (case-insensitive, so it can't
+    /// live in this exact-match set) and never accepted for `final`/detours.
     private let resolvableTags: Set<String>
     private let groupNames: Set<String>
     private let ruleSetTags: Set<String>
@@ -54,7 +77,7 @@ struct RouteBuilder {
         // rule_set entries are emitted only when at least one rule (route or
         // DNS) references them, but we keep them whenever declared so the user's
         // managed sets are available; reference validation is a soft warning.
-        let ruleSetObjects = routing.ruleSets.map(ruleSetObject(for:))
+        let ruleSetObjects = routing.ruleSets.map { ruleSetObject(for: $0, warnings: &warnings) }
         if !ruleSetObjects.isEmpty {
             route["rule_set"] = ruleSetObjects
         }
@@ -77,6 +100,12 @@ struct RouteBuilder {
 
     private func resolveFinalTarget(warnings: inout [String]) -> String {
         let target = routing.finalTarget
+        // "reject" is a rule action, not an outbound tag: emitting it as
+        // route.final would be a fatal unknown-outbound reference.
+        if BuiltinReject.matches(target) {
+            warnings.append("route.final 不能使用内置拒绝目标 “\(target)”，已回退到 “\(PolicyGroup.defaultGroupName)”。")
+            return PolicyGroup.defaultGroupName
+        }
         if resolvableTags.contains(target) {
             return target
         }
@@ -144,7 +173,11 @@ struct RouteBuilder {
         for member in group.members {
             switch member.kind {
             case .node, .builtin:
-                if member.kind == .builtin {
+                if BuiltinReject.matches(member.tag) {
+                    // "reject" is a rule action, not an outbound: a verbatim
+                    // member tag would make sing-box fail to start.
+                    warnings.append("策略组 “\(group.name)” 不能引用内置拒绝目标 “\(member.tag)”，已跳过。")
+                } else if member.kind == .builtin {
                     // Built-ins ("direct"/"proxy") and any node tag are accepted.
                     tags.append(member.tag)
                 } else if nodeTags.contains(member.tag) {
@@ -179,8 +212,16 @@ struct RouteBuilder {
     }
 
     /// Compiles a single rule into a `route.rules` entry with an explicit
-    /// `{action:"route", outbound:<target>}` (sing-box 1.11+).
+    /// `{action:"route", outbound:<target>}` (sing-box 1.11+). Reject targets
+    /// compile to `{action:"reject"}` with no `outbound` key; for logical
+    /// rules the action sits on the top-level entry only.
     private func ruleObject(for rule: RoutingRule, warnings: inout [String]) -> [String: Any]? {
+        if BuiltinReject.matches(rule.target) {
+            guard var matcher = matcherObject(for: rule, warnings: &warnings) else { return nil }
+            matcher["action"] = "reject"
+            return matcher
+        }
+
         guard resolvableTags.contains(rule.target) else {
             warnings.append("规则目标 “\(rule.target)” 未找到，规则已跳过。")
             return nil
@@ -288,7 +329,7 @@ struct RouteBuilder {
 
     // MARK: - rule_set
 
-    private func ruleSetObject(for entry: RuleSetEntry) -> [String: Any] {
+    private func ruleSetObject(for entry: RuleSetEntry, warnings: inout [String]) -> [String: Any] {
         var object: [String: Any] = [
             "type": entry.source.rawValue,
             "tag": entry.tag,
@@ -300,7 +341,14 @@ struct RouteBuilder {
                 object["url"] = url
             }
             if let detour = entry.downloadDetour, !detour.isEmpty {
-                object["download_detour"] = detour
+                if BuiltinReject.matches(detour) {
+                    // A reject download_detour would both be a fatal unknown
+                    // outbound and make the set impossible to fetch.
+                    warnings.append("规则集 “\(entry.tag)” 的 download_detour 不能使用内置拒绝目标 “\(detour)”，已回退到 “direct”。")
+                    object["download_detour"] = "direct"
+                } else {
+                    object["download_detour"] = detour
+                }
             }
             if let interval = entry.updateInterval, !interval.isEmpty {
                 object["update_interval"] = interval

@@ -633,6 +633,212 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertEqual(try route(in: config)["final"] as? String, "proxy")
     }
 
+    // MARK: - REJECT targets (sing-box 1.11+ reject action)
+
+    func testRejectRuleEmitsRejectActionWithoutOutbound() throws {
+        // Every casing and Surge variant maps onto the built-in reject action.
+        let spellings = ["reject", "REJECT", "Reject", "REJECT-DROP", "REJECT-TINYGIF", "REJECT-NO-DROP"]
+        for target in spellings {
+            let routing = RoutingConfig(
+                rules: [RoutingRule(type: .domainSuffix, value: "ads.example.com", target: target)]
+            )
+            let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+            let rules = try rules(in: config)
+            XCTAssertEqual(rules.count, 1, "target \(target)")
+            XCTAssertEqual(rules[0]["action"] as? String, "reject", "target \(target)")
+            XCTAssertNil(rules[0]["outbound"], "target \(target)")
+            XCTAssertEqual(rules[0]["domain_suffix"] as? [String], ["ads.example.com"])
+        }
+    }
+
+    func testLogicalRejectRuleKeepsActionAtTopLevel() throws {
+        let routing = RoutingConfig(
+            rules: [
+                RoutingRule(type: .and, subRules: [
+                    RoutingRule(type: .domainSuffix, value: "tracker.com", target: ""),
+                    RoutingRule(type: .port, value: "443", target: ""),
+                ], target: "REJECT"),
+            ]
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let logical = try rules(in: config)[0]
+        XCTAssertEqual(logical["type"] as? String, "logical")
+        XCTAssertEqual(logical["mode"] as? String, "and")
+        XCTAssertEqual(logical["action"] as? String, "reject")
+        XCTAssertNil(logical["outbound"])
+        let sub = try XCTUnwrap(logical["rules"] as? [[String: Any]])
+        XCTAssertEqual(sub.count, 2)
+        for entry in sub {
+            XCTAssertNil(entry["action"])
+            XCTAssertNil(entry["outbound"])
+        }
+    }
+
+    func testRejectNeverLeaksIntoOutbounds() throws {
+        let routing = RoutingConfig(
+            rules: [RoutingRule(type: .domainKeyword, value: "ads", target: "REJECT")],
+            groups: [PolicyGroup(name: "proxy", members: [.node("A"), .builtin("direct")], isDefault: true)],
+            finalTarget: "proxy"
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let outbounds = try XCTUnwrap(config["outbounds"] as? [[String: Any]])
+        for outbound in outbounds {
+            let tag = try XCTUnwrap(outbound["tag"] as? String)
+            XCTAssertNotEqual(tag.lowercased(), "reject")
+            if let members = outbound["outbounds"] as? [String] {
+                XCTAssertFalse(members.contains { $0.lowercased() == "reject" }, "\(tag): \(members)")
+            }
+        }
+    }
+
+    func testValidateAcceptsRejectRuleTargets() throws {
+        let routing = RoutingConfig(
+            rules: [
+                RoutingRule(type: .domainKeyword, value: "ads", target: "REJECT"),
+                RoutingRule(type: .or, subRules: [
+                    RoutingRule(type: .domainSuffix, value: "tracker.com", target: ""),
+                    RoutingRule(type: .port, value: "8443", target: ""),
+                ], target: "reject"),
+            ]
+        )
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.isEmpty, "\(warnings)")
+    }
+
+    func testRejectFinalFallsBackToProxyWithWarning() throws {
+        let routing = RoutingConfig(finalTarget: "REJECT")
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        XCTAssertEqual(try route(in: config)["final"] as? String, "proxy")
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.contains { $0.contains("route.final") && $0.contains("REJECT") }, "\(warnings)")
+    }
+
+    func testRejectGroupMemberSkippedWithWarning() throws {
+        let routing = RoutingConfig(
+            groups: [PolicyGroup(name: "Ad Block", type: .select,
+                                 members: [.builtin("REJECT"), .node("A")])]
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let group = try outbound(tagged: "Ad Block", in: config)
+        XCTAssertEqual(group["outbounds"] as? [String], ["A"])
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.contains { $0.contains("Ad Block") && $0.contains("REJECT") }, "\(warnings)")
+    }
+
+    func testRejectDownloadDetourFallsBackToDirectWithWarning() throws {
+        let routing = RoutingConfig(
+            rules: [RoutingRule(type: .geosite, value: "geosite-ads", target: "REJECT")],
+            ruleSets: [RuleSetEntry(tag: "geosite-ads", url: "https://e/ads.srs", downloadDetour: "REJECT")]
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let ruleSets = try XCTUnwrap(try route(in: config)["rule_set"] as? [[String: Any]])
+        XCTAssertEqual(ruleSets[0]["download_detour"] as? String, "direct")
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.contains { $0.contains("geosite-ads") && $0.contains("download_detour") }, "\(warnings)")
+    }
+
+    func testRejectDNSDetourOmittedWithWarning() throws {
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: true,
+                servers: [DNSServer(tag: "blocked", address: "tls://1.1.1.1", detour: "REJECT")]
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        let blocked = try XCTUnwrap(servers.first { $0["tag"] as? String == "blocked" })
+        XCTAssertNil(blocked["detour"])
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.contains { $0.contains("blocked") && $0.contains("detour") }, "\(warnings)")
+    }
+
+    func testDNSServerTaggedRejectIsUntouched() throws {
+        // DNS server tags are their own namespace: "reject" is a valid tag
+        // there and must not trip the reserved-word handling.
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: true,
+                servers: [DNSServer(tag: "reject", address: "tls://1.1.1.1")],
+                rules: [DNSRule(matcher: .domainSuffix, value: "ads.com", server: "reject")],
+                finalServerTag: "reject"
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertTrue(servers.contains { $0["tag"] as? String == "reject" })
+        XCTAssertEqual(dns["final"] as? String, "reject")
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertEqual(dnsRules[0]["server"] as? String, "reject")
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.isEmpty, "\(warnings)")
+    }
+
+    func testRejectNodeNamesAreRenamedCaseInsensitively() throws {
+        // "reject" is reserved in any casing; "proxy"/"direct" keep their
+        // historical exact-match behavior (an upper-case PROXY node survives).
+        let nodes = [ssNode("reject"), ssNode("REJECT"), ssNode("Reject"), ssNode("PROXY")]
+        XCTAssertEqual(builder.outboundTags(for: nodes),
+                       ["reject-2", "REJECT-2", "Reject-2", "PROXY"])
+    }
+
+    func testUserRejectRuleCoexistsWithTunQuicReject() throws {
+        var prefs = AppPreferences()
+        prefs.proxyMode = .tun
+        prefs.routing = RoutingConfig(
+            rules: [RoutingRule(type: .domainKeyword, value: "ads", target: "REJECT")]
+        )
+        let data = try builder.build(nodes: [ssNode("A")], preferences: prefs)
+        let config = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rules = try rules(in: config)
+        // The injected TUN prefix (sniff / hijack-dns / quic-reject) precedes
+        // the user's reject rule; both reject entries survive side by side.
+        XCTAssertEqual(rules[2]["protocol"] as? String, "quic")
+        XCTAssertEqual(rules[2]["action"] as? String, "reject")
+        let userRule = try XCTUnwrap(rules.first { ($0["domain_keyword"] as? [String]) == ["ads"] })
+        XCTAssertEqual(userRule["action"] as? String, "reject")
+        XCTAssertNil(userRule["outbound"])
+    }
+
+    func testRejectConfigValidatesAgainstSingBox() throws {
+        // <root>/packages/LinkoKit/Tests/LinkoKitTests/<file> → strip the file
+        // name plus four directories to reach the repo root (worktree-safe,
+        // unlike a hardcoded checkout path).
+        let binary = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // LinkoKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // LinkoKit
+            .deletingLastPathComponent() // packages
+            .deletingLastPathComponent() // repo root
+            .appendingPathComponent("vendor/sing-box/sing-box")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: binary.path),
+                          "sing-box binary not available")
+        // Leaf + logical reject rules must pass the real core's check — the
+        // schema class that would blow up if "reject" leaked as an outbound.
+        let routing = RoutingConfig(
+            rules: [
+                RoutingRule(type: .domainKeyword, value: "ads", target: "REJECT"),
+                RoutingRule(type: .and, subRules: [
+                    RoutingRule(type: .domainSuffix, value: "tracker.com", target: ""),
+                    RoutingRule(type: .port, value: "443", target: ""),
+                ], target: "reject"),
+            ]
+        )
+        let data = try buildData(nodes: [ssNode("A")], routing: routing)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("linko-reject-\(UUID().uuidString).json")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = ConfigValidator().validate(configFileURL: url, binaryURL: binary)
+        XCTAssertTrue(result.isValid, "errors: \(result.errors)")
+    }
+
     // MARK: - Backward compatibility
 
     func testEmptyRoutingMatchesLegacyShape() throws {

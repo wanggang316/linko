@@ -31,8 +31,10 @@ public enum SingBoxConfigError: Error, Equatable, LocalizedError {
 /// from `routing.finalTarget`, and a `dns` block when `routing.dns.isEnabled`.
 public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
     /// Tags reserved for non-node outbounds; node tags must never collide
-    /// with these.
-    private static let reservedTags: Set<String> = ["proxy", "direct"]
+    /// with these. "reject" is reserved because it names the built-in reject
+    /// rule action (sing-box 1.11+), matched case-insensitively by
+    /// `uniqueTag`; "proxy"/"direct" keep their historical exact-match rule.
+    private static let reservedTags: Set<String> = ["proxy", "direct", "reject"]
 
     private let outboundBuilder = OutboundBuilder()
     private let dnsBuilder = DNSBuilder()
@@ -50,7 +52,8 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
     /// Validates `routing` against `nodes`: every rule/group/DNS/final target
     /// must resolve to a node tag, a defined group, or a built-in ("direct"/
-    /// "proxy"); rule-set references must exist; group nesting must not cycle.
+    /// "proxy"; rules may additionally target the built-in reject action);
+    /// rule-set references must exist; group nesting must not cycle.
     /// Soft problems return warnings; the config still builds (dropping the
     /// offending pieces). There are currently no hard errors that throw here —
     /// `build` itself throws only on missing node fields / empty node lists.
@@ -67,16 +70,28 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
         // Rule targets + rule-set references.
         validateRuleTargets(routing.rules, resolvable: resolvable, ruleSetTags: ruleSetTags, warnings: &warnings)
 
+        // rule_set download_detour must be a real outbound; "reject" is a rule
+        // action and would be a fatal unknown-outbound reference.
+        for ruleSet in routing.ruleSets {
+            if let detour = ruleSet.downloadDetour, BuiltinReject.matches(detour) {
+                warnings.append("规则集 “\(ruleSet.tag)” 的 download_detour 不能使用内置拒绝目标 “\(detour)”，将回退到 “direct”。")
+            }
+        }
+
         // Group membership + nesting cycles.
         for group in routing.groups {
             for member in group.members {
                 switch member.kind {
-                case .node where !nodeTags.contains(member.tag):
-                    warnings.append("策略组 “\(group.name)” 引用了未知节点 “\(member.tag)”。")
-                case .group where !groupNames.contains(member.tag):
-                    warnings.append("策略组 “\(group.name)” 引用了未知策略组 “\(member.tag)”。")
-                default:
-                    break
+                case .node, .builtin:
+                    if BuiltinReject.matches(member.tag) {
+                        warnings.append("策略组 “\(group.name)” 不能引用内置拒绝目标 “\(member.tag)”，该成员将被跳过。")
+                    } else if member.kind == .node, !nodeTags.contains(member.tag) {
+                        warnings.append("策略组 “\(group.name)” 引用了未知节点 “\(member.tag)”。")
+                    }
+                case .group:
+                    if !groupNames.contains(member.tag) {
+                        warnings.append("策略组 “\(group.name)” 引用了未知策略组 “\(member.tag)”。")
+                    }
                 }
             }
         }
@@ -84,14 +99,24 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
             warnings.append("策略组存在循环引用：\(cycle.joined(separator: " → "))。")
         }
 
-        // Final target.
-        if !resolvable.contains(routing.finalTarget) {
+        // Final target. The built-in reject is never a valid final: it is a
+        // rule action, not an outbound the catch-all could route to.
+        if BuiltinReject.matches(routing.finalTarget) {
+            warnings.append("route.final 不能使用内置拒绝目标 “\(routing.finalTarget)”，将回退到 “\(PolicyGroup.defaultGroupName)”。")
+        } else if !resolvable.contains(routing.finalTarget) {
             warnings.append("route.final 目标 “\(routing.finalTarget)” 未找到。")
         }
 
-        // DNS server tags referenced by DNS rules / final.
+        // DNS server tags referenced by DNS rules / final. Server *tags* are
+        // their own namespace — a server tagged "reject" is fine — but a
+        // server's detour is an outbound reference and must not be reject.
         if routing.dns.isEnabled {
             let serverTags = Set(routing.dns.servers.map(\.tag))
+            for server in routing.dns.servers {
+                if let detour = server.detour, BuiltinReject.matches(detour) {
+                    warnings.append("DNS 服务器 “\(server.tag)” 的 detour 不能使用内置拒绝目标 “\(detour)”，将被忽略。")
+                }
+            }
             for rule in routing.dns.rules where rule.isEnabled {
                 if !serverTags.contains(rule.server) {
                     warnings.append("DNS 规则引用了未知服务器 “\(rule.server)”。")
@@ -308,10 +333,16 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
         _ rules: [RoutingRule],
         resolvable: Set<String>,
         ruleSetTags: Set<String>,
+        isOperand: Bool = false,
         warnings: inout [String]
     ) {
         for rule in rules where rule.isEnabled {
-            if !rule.type.isFinal, !resolvable.contains(rule.target) {
+            // Targets only exist on top-level rules; logical operands carry no
+            // target (the builder ignores them), so checking one would produce
+            // a false "未找到". Reject targets are always valid: they compile
+            // to the built-in reject action rather than an outbound reference.
+            if !isOperand, !rule.type.isFinal, !BuiltinReject.matches(rule.target),
+               !resolvable.contains(rule.target) {
                 warnings.append("规则目标 “\(rule.target)” 未找到。")
             }
             if rule.type.usesRuleSet {
@@ -321,7 +352,8 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
                 }
             }
             if rule.type.isLogical {
-                validateRuleTargets(rule.subRules, resolvable: resolvable, ruleSetTags: ruleSetTags, warnings: &warnings)
+                validateRuleTargets(rule.subRules, resolvable: resolvable, ruleSetTags: ruleSetTags,
+                                    isOperand: true, warnings: &warnings)
             }
         }
     }
@@ -365,11 +397,14 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
 
     /// Returns a tag for `name` that does not collide with reserved tags or
     /// previously assigned node tags, appending a numeric suffix when needed.
+    /// "reject" collides case-insensitively (it names the built-in reject rule
+    /// action, so a node tag spelled REJECT/Reject would shadow it); the other
+    /// reserved tags keep their historical exact-match behavior.
     private func uniqueTag(for name: String, used: inout Set<String>) -> String {
         let base = name.isEmpty ? "node" : name
         var candidate = base
         var counter = 2
-        while used.contains(candidate) {
+        while used.contains(candidate) || candidate.lowercased() == "reject" {
             candidate = "\(base)-\(counter)"
             counter += 1
         }
