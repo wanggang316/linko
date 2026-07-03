@@ -52,6 +52,15 @@
 - **已知坑:** worktree 复用旧 `.build` 会报 ModuleCache 旧路径错误；删 `packages/LinkoKit/.build/arm64-apple-macosx/debug/ModuleCache` 重跑。
 - **Cost tier:** cheap
 
+### LinkoApp 应用层单测
+
+- **Primary:** `make test-app`（= xcodebuild -scheme LinkoAppTests test，CODE_SIGNING_ALLOWED=NO，免宿主：app 源码直接编入测试 bundle，不启动真实 app）
+- **Fallback:** 无
+- **Invocation:** `make gen && make test-app`
+- **Ready signal:** 编译通过即绪；无签名可跑
+- **已知坑:** xcodebuild（`make build`/`make test-app`）会把 app 的 Sparkle pin 顺带写进 `packages/LinkoKit/Package.resolved`；属 incidental churn，提交前还原该文件。
+- **Cost tier:** cheap-medium（xcodebuild 首跑编译较慢）
+
 ## Case Dimensions
 
 | 维度 | 是否必须？ | 检查什么 |
