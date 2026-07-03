@@ -338,9 +338,15 @@ private struct RuleRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         } else if rule.type.isFinal {
-            Text("未命中其它规则的所有流量")
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.Color.secondaryLabel)
+            if isInertFinalReject {
+                Label("兜底不支持拒绝，此行不生效", systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.warning)
+            } else {
+                Text("未命中其它规则的所有流量")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.secondaryLabel)
+            }
         } else if rule.value.isEmpty {
             Label("缺少匹配值", systemImage: "exclamationmark.triangle.fill")
                 .font(Theme.Font.caption)
@@ -362,21 +368,42 @@ private struct RuleRow: View {
         return head.isEmpty ? "无子条件" : head + suffix
     }
 
+    /// `true` for the inert FINAL + reject combination: `route.final` must
+    /// name a real outbound, so the engine never emits this line. The editor
+    /// refuses to save it, but imported profiles (FINAL,REJECT / MATCH,REJECT)
+    /// may still carry it — flag it instead of rendering an effective-looking
+    /// reject pill.
+    private var isInertFinalReject: Bool {
+        rule.type.isFinal && BuiltinReject.matches(rule.target)
+    }
+
     private var targetPill: some View {
         let target = targets.resolve(rule.target)
-        let resolved = targets.isResolved(rule.target)
+        let flagged = !targets.isResolved(rule.target) || isInertFinalReject
         return HStack(spacing: Theme.Spacing.xxs + 1) {
-            Image(systemName: resolved ? target.symbolName : "questionmark.circle")
+            Image(systemName: flagged
+                    ? (isInertFinalReject ? "exclamationmark.triangle" : "questionmark.circle")
+                    : target.symbolName)
                 .font(.caption2.weight(.semibold))
             Text(target.displayName)
                 .font(Theme.Font.caption.weight(.medium))
                 .lineLimit(1)
         }
-        .foregroundStyle(resolved ? Theme.Color.accent : Theme.Color.warning)
+        .foregroundStyle(flagged ? Theme.Color.warning : Theme.Color.accent)
         .padding(.horizontal, Theme.Spacing.xs + 1)
         .padding(.vertical, Theme.Spacing.xxs)
-        .background((resolved ? Theme.Color.accent : Theme.Color.warning).opacity(0.12), in: Capsule())
-        .help(resolved ? "出站目标：\(target.tag)" : "未知出站目标「\(rule.target)」——请在编辑中重新指定")
+        .background((flagged ? Theme.Color.warning : Theme.Color.accent).opacity(0.12), in: Capsule())
+        .help(targetPillHelp)
+    }
+
+    private var targetPillHelp: String {
+        if isInertFinalReject {
+            return "兜底不支持拒绝，此行不生效——请在编辑中重新指定目标"
+        }
+        if targets.isResolved(rule.target) {
+            return "出站目标：\(targets.resolve(rule.target).tag)"
+        }
+        return "未知出站目标「\(rule.target)」——请在编辑中重新指定"
     }
 }
 

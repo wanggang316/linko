@@ -164,6 +164,49 @@ final class SurgeRuleImporterTests: XCTestCase {
         XCTAssertEqual(result.warnings.count, 1)
         XCTAssertTrue(result.warnings[0].contains("without a policy"))
     }
+
+    // MARK: - REJECT policies
+
+    func testRejectVariantsCarryVerbatimAndMatchEnginePredicate() {
+        let text = """
+        [Rule]
+        DOMAIN,ads.example.com,REJECT
+        DOMAIN-SUFFIX,drop.example.com,Reject-Drop
+        DOMAIN-KEYWORD,tinygif,reject-tinygif
+        DOMAIN,nodrop.example.com,REJECT-NO-DROP
+        """
+        let result = importer.importSurgeRules(text)
+        // Targets are stored verbatim; every spelling must satisfy the engine
+        // predicate so preview counting and rule compilation both resolve them.
+        XCTAssertEqual(result.rules.map(\.target),
+                       ["REJECT", "Reject-Drop", "reject-tinygif", "REJECT-NO-DROP"])
+        for target in result.rules.map(\.target) {
+            XCTAssertTrue(BuiltinReject.matches(target), target)
+        }
+    }
+
+    func testUnresolvedPoliciesExcludeRejectSpellings() {
+        let text = """
+        [Rule]
+        DOMAIN,ads.example.com,REJECT
+        DOMAIN,drop.example.com,reject-drop
+        DOMAIN,a.example.com,Ghost
+        FINAL,REJECT
+        """
+        let result = importer.importSurgeRules(text)
+        // The import preview's tag set only holds the lowercase built-in, yet
+        // every reject spelling must resolve — only "Ghost" is unmatched.
+        let unresolved = result.unresolvedPolicies(existingTags: ["direct", "proxy", "reject"])
+        XCTAssertEqual(unresolved, ["Ghost"])
+    }
+
+    func testFinalRejectImportsAsFinalRuleWithVerbatimTarget() {
+        let result = importer.importSurgeRules("[Rule]\nFINAL,REJECT")
+        XCTAssertEqual(result.rules.count, 1)
+        XCTAssertEqual(result.rules[0].type, .final)
+        XCTAssertEqual(result.rules[0].value, "")
+        XCTAssertEqual(result.rules[0].target, "REJECT")
+    }
 }
 
 final class ClashRuleImporterTests: XCTestCase {
@@ -287,5 +330,130 @@ final class ClashRuleImporterTests: XCTestCase {
         let viaClash = ClashRuleImporter().importSurgeRules(surgeText)
         XCTAssertEqual(viaClash.rules.count, 1)
         XCTAssertEqual(viaClash.rules[0].value, "y.com")
+    }
+
+    // MARK: - REJECT policies
+
+    func testUnresolvedPoliciesExcludeRejectSpellings() {
+        let text = """
+        rules:
+          - DOMAIN,ads.example.com,REJECT
+          - DOMAIN,drop.example.com,REJECT-DROP
+          - DOMAIN,a.example.com,Ghost
+          - MATCH,REJECT
+        """
+        let result = importer.importClashRules(text)
+        // Same counting predicate as the Surge channel: reject spellings
+        // resolve via the engine predicate, so only "Ghost" is unmatched.
+        let unresolved = result.unresolvedPolicies(existingTags: ["direct", "proxy", "reject"])
+        XCTAssertEqual(unresolved, ["Ghost"])
+    }
+
+    func testMatchRejectImportsAsFinalRuleWithVerbatimTarget() {
+        let result = importer.importClashRules("- MATCH,REJECT")
+        XCTAssertEqual(result.rules.count, 1)
+        XCTAssertEqual(result.rules[0].type, .final)
+        XCTAssertEqual(result.rules[0].value, "")
+        XCTAssertEqual(result.rules[0].target, "REJECT")
+    }
+}
+
+// =============================================================================
+// MARK: - Import → config generation pipeline (REJECT)
+// =============================================================================
+
+/// Pins the imported-data → generated-config semantics for reject policies:
+/// targets the importers store verbatim must compile to the sing-box reject
+/// action, and an imported `FINAL,REJECT` / `MATCH,REJECT` line must stay
+/// inert (no rules entry, `route.final` untouched, core still starts).
+final class RejectImportPipelineTests: XCTestCase {
+    private let builder = SingBoxConfigBuilder()
+
+    private func ssNode(_ name: String) -> ProxyNode {
+        ProxyNode(name: name, protocolType: .shadowsocks, server: "\(name).example.com",
+                  port: 8388, password: "pw", method: "aes-256-gcm")
+    }
+
+    private func buildData(rules: [RoutingRule]) throws -> Data {
+        var prefs = AppPreferences()
+        prefs.routing = RoutingConfig(rules: rules, finalTarget: "proxy")
+        return try builder.build(nodes: [ssNode("A")], preferences: prefs)
+    }
+
+    private func buildJSON(rules: [RoutingRule]) throws -> [String: Any] {
+        let data = try buildData(rules: rules)
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    func testSurgeRejectVariantsCompileToRejectAction() throws {
+        let text = """
+        [Rule]
+        DOMAIN,ads.example.com,REJECT
+        DOMAIN-SUFFIX,drop.example.com,REJECT-DROP
+        DOMAIN-KEYWORD,tinygif,REJECT-TINYGIF
+        DOMAIN,nodrop.example.com,reject-no-drop
+        """
+        let imported = SurgeRuleImporter().importSurgeRules(text)
+        XCTAssertEqual(imported.rules.count, 4)
+
+        let config = try buildJSON(rules: imported.rules)
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertEqual(rules.count, 4)
+        for rule in rules {
+            XCTAssertEqual(rule["action"] as? String, "reject")
+            XCTAssertNil(rule["outbound"])
+        }
+        // No stored variant literal leaks anywhere an outbound tag lives.
+        let outbounds = try XCTUnwrap(config["outbounds"] as? [[String: Any]])
+        XCTAssertFalse(outbounds.contains { BuiltinReject.matches(($0["tag"] as? String) ?? "") })
+    }
+
+    func testClashRejectCompilesAndMatchRejectStaysInert() throws {
+        let text = """
+        rules:
+          - DOMAIN,ads.example.com,REJECT
+          - MATCH,REJECT
+        """
+        let imported = ClashRuleImporter().importClashRules(text)
+        XCTAssertEqual(imported.rules.count, 2)
+
+        let config = try buildJSON(rules: imported.rules)
+        let route = try XCTUnwrap(config["route"] as? [String: Any])
+        // MATCH,REJECT must neither rewrite route.final nor emit a rules entry.
+        XCTAssertEqual(route["final"] as? String, "proxy")
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertEqual(rules.count, 1)
+        XCTAssertEqual(rules[0]["action"] as? String, "reject")
+        XCTAssertEqual(rules[0]["domain"] as? [String], ["ads.example.com"])
+    }
+
+    func testImportedFinalRejectConfigValidatesAgainstSingBox() throws {
+        // <root>/packages/LinkoKit/Tests/LinkoKitTests/<file> → strip the file
+        // name plus four directories to reach the repo root (worktree-safe).
+        let binary = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // LinkoKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // LinkoKit
+            .deletingLastPathComponent() // packages
+            .deletingLastPathComponent() // repo root
+            .appendingPathComponent("vendor/sing-box/sing-box")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: binary.path),
+                          "sing-box binary not available")
+        // A profile carrying both a leaf reject and FINAL,REJECT must produce
+        // a config the real core accepts — the class that would blow up if the
+        // inert FINAL line rewrote route.final to a non-outbound.
+        let imported = SurgeRuleImporter().importSurgeRules("""
+        [Rule]
+        DOMAIN,ads.example.com,REJECT
+        FINAL,REJECT
+        """)
+        let data = try buildData(rules: imported.rules)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("linko-final-reject-\(UUID().uuidString).json")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = ConfigValidator().validate(configFileURL: url, binaryURL: binary)
+        XCTAssertTrue(result.isValid, "errors: \(result.errors)")
     }
 }
