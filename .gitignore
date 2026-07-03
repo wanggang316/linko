@@ -12,3 +12,4 @@ vendor/
 
 # SwiftPM
 .swiftpm/
+.harness-runtime/
