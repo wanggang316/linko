@@ -9,28 +9,41 @@ struct ImportSubscriptionView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var sourceText = ""
-    @State private var phase: Phase = .idle
+    @State private var sourceText: String
+    @State private var phase: Phase
 
     /// Import lifecycle, driving both the button and the result area.
-    private enum Phase: Equatable {
+    enum Phase: Equatable {
         case idle
         case importing
         case failed(String)
         case finished(summary: String, warnings: [String])
     }
 
+    /// The window always opens on an empty, idle form. The parameters exist so
+    /// the sizing tests can render a phase that is otherwise only reachable by
+    /// running a real import.
+    init(sourceText: String = "", phase: Phase = .idle) {
+        _sourceText = State(initialValue: sourceText)
+        _phase = State(initialValue: phase)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             header
-            inputCard
-            resultArea
-            Spacer(minLength: 0)
+            scrollingContent
             footer
         }
         .padding(Theme.Spacing.xl)
         .frame(width: 460)
-        .frame(minHeight: 360)
+        // The window is sized by `.windowResizability(.contentSize)`, so it is
+        // only ever as tall as the ideal height this view reports. A greedy
+        // `Spacer` under a 360pt floor made that height say "anything goes",
+        // and the window settled on one that clipped whatever the result area
+        // added off both edges; `fixedSize` reports the stacked height of the
+        // real content instead, and the window follows it as the import moves
+        // from idle to progress to result.
+        .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
     }
 
@@ -51,6 +64,31 @@ struct ImportSubscriptionView: View {
             }
         }
     }
+
+    // MARK: - Content
+
+    /// The source field plus the result area, which take exactly their own
+    /// height until that passes `contentMaxHeight` — past which they scroll.
+    /// Anything that can grow without bound (a pasted node list, a download
+    /// error quoting the system's message, a long list of skipped nodes)
+    /// therefore shortens the scrollable area rather than pushing the footer
+    /// buttons out of the window.
+    private var scrollingContent: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                inputCard
+                resultArea
+            }
+        }
+        .frame(maxHeight: Self.contentMaxHeight)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    /// The tallest the content area grows before it scrolls: comfortably past
+    /// the tallest result the flow produces today (a summary plus a handful of
+    /// skipped nodes) while keeping the whole window short enough to fit a
+    /// laptop screen. Matches the quick-add window's cap.
+    private static let contentMaxHeight: CGFloat = 420
 
     // MARK: - Input
 
@@ -170,7 +208,7 @@ struct ImportSubscriptionView: View {
 // =============================================================================
 
 /// Successful-import summary: a green confirmation line plus, when present, a
-/// scrollable list of skipped-node warnings rendered icon-first.
+/// list of skipped-node warnings rendered icon-first.
 private struct ResultCard: View {
     let summary: String
     let warnings: [String]
@@ -197,14 +235,14 @@ private struct ResultCard: View {
                         Spacer()
                         CountBadge(count: warnings.count)
                     }
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                            ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                                WarningRow(text: warning)
-                            }
+                    // No scroller of its own: the window's content area is
+                    // already one, and a second along the same axis would trap
+                    // the wheel in a 140pt box inside a scrolling window.
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                        ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                            WarningRow(text: warning)
                         }
                     }
-                    .frame(maxHeight: 140)
                 }
             }
         }
