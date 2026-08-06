@@ -21,13 +21,18 @@ struct QuickAddRuleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             header
-            content
-            Spacer(minLength: 0)
+            scrollingContent
             footer
         }
         .padding(Theme.Spacing.xl)
         .frame(width: 460)
-        .frame(minHeight: 320)
+        // The window is sized by `.windowResizability(.contentSize)`, so it is
+        // only ever as tall as the ideal height this view reports. A greedy
+        // `Spacer` made that height say "anything goes", and the window settled
+        // on one that clipped the title and the buttons off both edges;
+        // `fixedSize` reports the stacked height of the real content instead,
+        // and the window follows it as the capture state changes.
+        .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
         .onAppear { rebuildForm(for: appState.quickAddCapture) }
         .onChange(of: appState.quickAddCapture) { _, newState in
@@ -72,6 +77,25 @@ struct QuickAddRuleView: View {
     }
 
     // MARK: - Content
+
+    /// The capture/form area, which takes exactly its own height until that
+    /// passes `contentMaxHeight` — past which it scrolls. Anything that can
+    /// grow the form (a wrapped guidance line, the third candidate, a future
+    /// field) therefore shortens the scrollable area rather than pushing the
+    /// footer buttons out of the window.
+    private var scrollingContent: some View {
+        ScrollView(.vertical) {
+            content
+        }
+        .frame(maxHeight: Self.contentMaxHeight)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    /// The tallest the content area grows before it scrolls: comfortably past
+    /// the tallest form the flow produces today (three candidates plus a
+    /// wrapped notice) while keeping the whole window short enough to fit a
+    /// laptop screen.
+    private static let contentMaxHeight: CGFloat = 420
 
     @ViewBuilder
     private var content: some View {
