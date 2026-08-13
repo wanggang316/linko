@@ -1,0 +1,71 @@
+name: pages
+
+# Builds the marketing site in `website/` and publishes it to GitHub Pages.
+# The site reads CHANGELOG.md and project.yml from the repository root at build
+# time, so a release commit republishes the changelog and the version on its
+# own. Enable once in Settings › Pages by setting the source to GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'CHANGELOG.md'
+      - 'project.yml'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a deploy midway; queue instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  ASTRO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Type check
+        working-directory: website
+        run: npm run check
+
+      - name: Build
+        working-directory: website
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
