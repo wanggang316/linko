@@ -23,13 +23,13 @@ const cards = [
   {
     file: 'og.png',
     lang: 'zh-Hans',
-    headline: '把 sing-box 装进菜单栏',
+    headline: 'linko — 把 sing-box 装进菜单栏',
     sub: '开源的 macOS 原生代理客户端 · 系统代理与 TUN · 规则分流 · 连接观测',
   },
   {
     file: 'og-en.png',
     lang: 'en',
-    headline: 'sing-box, right in your menu bar',
+    headline: 'linko — sing-box in your menu bar',
     sub: 'Open-source native macOS proxy client · System proxy & TUN · Rule-based routing',
   },
 ];
@@ -40,51 +40,29 @@ const page = ({ lang, headline, sub }) => `<!doctype html>
   * { margin: 0; box-sizing: border-box; }
   body {
     width: 1200px; height: 630px; display: flex; flex-direction: column;
-    justify-content: space-between; padding: 72px 76px;
-    background: #090b10; color: #e9edf5; position: relative; overflow: hidden;
-    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    justify-content: space-between; padding: 64px 72px;
+    background: #fcfcfa; color: #1c1c1c;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
     -webkit-font-smoothing: antialiased;
   }
-  body::before {
-    content: ''; position: absolute; inset: -40% -20% auto -20%; height: 700px;
-    background: radial-gradient(50% 60% at 30% 40%, rgba(34,197,94,.18), transparent 70%);
-  }
-  .row { display: flex; align-items: center; gap: 16px; position: relative; }
-  .mark { width: 52px; height: 52px; border-radius: 14px; background: #12161f;
-          display: grid; place-items: center; }
-  .word { font-size: 34px; font-weight: 600; letter-spacing: -.02em; }
-  .headline { position: relative; font-size: 76px; font-weight: 600; line-height: 1.1;
-              letter-spacing: -.035em; max-width: 20ch; }
-  .accent { color: #4ade80; }
-  .sub { position: relative; margin-top: 26px; font-size: 25px; color: #9aa5b8;
-         letter-spacing: -.01em; }
-  .meta { position: relative; display: flex; align-items: center; gap: 14px;
-          font-size: 21px; color: #78849a; }
-  .dot { width: 5px; height: 5px; border-radius: 50%; background: #3a4354; }
-  .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
-          background: linear-gradient(90deg, #22c55e, rgba(34,197,94,0)); }
+  .manline { display: flex; justify-content: space-between; font-size: 24px;
+             color: #6e6e6a; }
+  .manline b { color: #1c1c1c; }
+  .label { font-size: 26px; font-weight: 700; letter-spacing: .08em; }
+  .headline { margin-top: 14px; padding-left: 56px; font-size: 44px;
+              font-weight: 700; line-height: 1.35; max-width: 24ch; }
+  .sub { margin-top: 22px; padding-left: 56px; font-size: 25px; color: #6e6e6a;
+         line-height: 1.6; }
+  .meta { font-size: 22px; color: #6e6e6a; border-top: 2px solid #dcdcd6;
+          padding-top: 28px; }
 </style>
-<div class="row">
-  <span class="mark">
-    <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-      <path d="M11.4 20.6 20.6 11.4" stroke="#22c55e" stroke-width="2.6" stroke-linecap="round"/>
-      <circle cx="10.1" cy="21.9" r="3.4" stroke="#22c55e" stroke-width="2.6"/>
-      <circle cx="21.9" cy="10.1" r="3.4" stroke="#22c55e" stroke-width="2.6"/>
-    </svg>
-  </span>
-  <span class="word">linko</span>
-</div>
+<div class="manline"><b>LINKO(1)</b><span>${lang === 'en' ? 'macOS User Commands' : 'macOS 用户命令'}</span><b>LINKO(1)</b></div>
 <div>
+  <div class="label">NAME</div>
   <h1 class="headline">${headline}</h1>
   <p class="sub">${sub}</p>
 </div>
-<div class="meta">
-  <span>v${version}</span><span class="dot"></span>
-  <span>macOS 14.0+</span><span class="dot"></span>
-  <span>GPL-3.0</span><span class="dot"></span>
-  <span>github.com/wanggang316/linko</span>
-</div>
-<div class="rule"></div>
+<div class="meta">v${version} · macOS 14.0+ · GPL-3.0 · github.com/wanggang316/linko</div>
 `;
 
 const work = mkdtempSync(join(tmpdir(), 'linko-og-'));

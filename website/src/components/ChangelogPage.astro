@@ -1,8 +1,7 @@
 ---
-import Icon from './Icon.astro';
 import { getReleases } from '../lib/changelog';
-import { RELEASES_URL, repoFileUrl } from '../lib/site';
-import { formatDate, t, type Lang } from '../lib/i18n';
+import { repoFileUrl } from '../lib/site';
+import { t, type Lang } from '../lib/i18n';
 
 interface Props {
   lang: Lang;
@@ -15,381 +14,66 @@ const releases = getReleases(lang);
 const anchor = (version: string) => `v${version.toLowerCase().replace(/[^a-z0-9.]+/g, '-')}`;
 const sectionLabel = (title: string) => copy.changelog.sections[title] ?? title;
 const latest = releases.find((release) => !release.unreleased)?.version;
+
+const sourceLink = `<a href="${repoFileUrl('CHANGELOG.md')}" target="_blank" rel="noopener noreferrer">CHANGELOG.md</a>`;
 ---
 
-<div class="container page">
-  <header class="page-head">
-    <h1>{copy.changelog.title}</h1>
-    <p class="page-sub">{copy.changelog.subtitle}</p>
-    <p class="page-source">
-      {copy.changelog.source}
-      <a class="link" href={repoFileUrl('CHANGELOG.md')} target="_blank" rel="noopener noreferrer">
-        CHANGELOG.md
-        <Icon name="externalLink" size={12} strokeWidth={2} />
-      </a>
-    </p>
-  </header>
-
-  <div class="layout">
-    <nav class="rail" aria-label={copy.changelog.releasesNav}>
-      <p class="rail-title">{copy.changelog.releasesNav}</p>
-      <ul>
-        {
-          releases.map((release) => (
-            <li>
-              <a href={`#${anchor(release.version)}`}>
-                <span>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</span>
-                {release.date && <time datetime={release.date}>{release.date}</time>}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-      <a class="rail-all" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-        {copy.changelog.allReleases}
-      </a>
-    </nav>
-
-    <div class="stream">
-      {
-        releases.map((release) => (
-          <article class="release" id={anchor(release.version)} data-reveal>
-            <header class="release-head">
-              <h2>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</h2>
-              {release.version === latest && <span class="tag">{copy.changelog.latest}</span>}
-              {release.date && (
-                <time class="release-date" datetime={release.date}>
-                  {formatDate(release.date, lang)}
-                </time>
-              )}
-            </header>
-
-            {release.note && <p class="release-note" set:html={release.note} />}
-
-            {lang === 'zh' && !release.translated && copy.changelog.untranslated && (
-              <p class="fallback">{copy.changelog.untranslated}</p>
-            )}
-
-            {release.sections.map((section) => (
-              <section class="group">
-                <h3 class:list={['group-title', section.title.toLowerCase()]}>
-                  {sectionLabel(section.title)}
-                </h3>
-                <ul class="entries">
-                  {section.entries.map((entry) => (
-                    <li set:html={entry} />
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </article>
-        ))
-      }
-    </div>
-  </div>
+<div class="manline" aria-hidden="true">
+  <b>LINKO-CHANGELOG(1)</b>
+  <span>{copy.manCenter}</span>
+  <b>LINKO-CHANGELOG(1)</b>
 </div>
 
+<div class="man">
+  <section>
+    <h2>CHANGELOG</h2>
+    <div class="body">
+      <h1 class="page-title">{copy.changelog.intro}</h1>
+      <p class="muted" set:html={copy.changelog.source(sourceLink)} />
+      <nav class="version-index muted">
+        {
+          releases.map((release) => (
+            <a href={`#${anchor(release.version)}`}>
+              {release.unreleased ? copy.changelog.unreleased : `v${release.version}`}
+            </a>
+          ))
+        }
+      </nav>
+    </div>
+  </section>
+</div>
+
+{
+  releases.map((release) => (
+    <article class="release" id={anchor(release.version)}>
+      <header class="release-head">
+        <h2>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</h2>
+        {release.date && <time datetime={release.date}>{release.date}</time>}
+        {release.version === latest && <span class="badge">{copy.changelog.latest}</span>}
+      </header>
+
+      {release.note && <p class="note" set:html={release.note} />}
+
+      {lang === 'zh' && !release.translated && copy.changelog.untranslated && (
+        <p class="note muted">{copy.changelog.untranslated}</p>
+      )}
+
+      {release.sections.map((section) => (
+        <section class="group">
+          <h3>{sectionLabel(section.title)}</h3>
+          <ul class="entries">
+            {section.entries.map((entry) => (
+              <li set:html={entry} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </article>
+  ))
+}
+
 <style>
-  .page {
-    padding-block: clamp(48px, 6vw, 80px) clamp(64px, 8vw, 112px);
-  }
-
-  .page-head {
-    max-width: 44rem;
-    padding-bottom: clamp(32px, 4vw, 48px);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .page-sub {
-    margin-top: 18px;
-    color: var(--text-muted);
-    font-size: 1.0625rem;
-  }
-
-  .page-source {
-    margin-top: 12px;
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-  }
-
-  .page-source a {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .layout {
-    display: grid;
-    grid-template-columns: 212px minmax(0, 1fr);
-    gap: clamp(32px, 5vw, 72px);
-    margin-top: clamp(32px, 4vw, 56px);
-  }
-
-  /* --- version rail -------------------------------------------------------- */
-
-  .rail {
-    position: sticky;
-    top: calc(var(--header-h) + 28px);
-    align-self: start;
-    max-height: calc(100dvh - var(--header-h) - 56px);
-    overflow-y: auto;
-  }
-
-  .rail-title {
-    margin-bottom: 12px;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    font-weight: 580;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .rail a {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 7px 10px;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    transition:
-      color 0.18s var(--ease),
-      background-color 0.18s var(--ease);
-  }
-
-  .rail a:hover {
-    color: var(--text);
-    background: var(--surface-2);
-  }
-
-  .rail time {
-    color: var(--text-dim);
-    font-size: 0.6875rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rail-all {
-    display: block;
-    margin-top: 14px;
-    padding-inline: 10px;
-    color: var(--accent-text);
-    font-size: 0.8125rem;
-  }
-
-  .rail-all:hover {
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  /* --- releases ------------------------------------------------------------ */
-
-  .stream {
-    position: relative;
-    display: grid;
-    gap: clamp(40px, 5vw, 64px);
-    min-width: 0;
-  }
-
-  .stream::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 12px;
-    bottom: 0;
-    width: 1px;
-    background: var(--border);
-  }
-
-  .release {
-    position: relative;
-    padding-left: 26px;
-  }
-
-  .release::after {
-    content: '';
-    position: absolute;
-    left: -3px;
-    top: 9px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--border-strong);
-    box-shadow: 0 0 0 4px var(--bg);
-  }
-
-  .release:first-child::after {
-    background: var(--accent);
-  }
-
-  .release-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  .release-head h2 {
-    font-size: 1.5rem;
-    letter-spacing: -0.025em;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .tag {
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    font-size: 0.6875rem;
-    font-weight: 580;
-    letter-spacing: 0.02em;
-  }
-
-  .release-date {
-    margin-left: auto;
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .release-note {
-    margin-top: 14px;
-    color: var(--text-muted);
-    max-width: 46rem;
-  }
-
-  .fallback {
-    display: inline-block;
-    margin-top: 14px;
-    padding: 6px 12px;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm);
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-  }
-
-  .group {
-    margin-top: 26px;
-  }
-
-  .group-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-
-  .group-title::before {
-    content: '';
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: currentColor;
-  }
-
-  .group-title.added {
-    color: #22c55e;
-  }
-
-  .group-title.changed {
-    color: #60a5fa;
-  }
-
-  .group-title.fixed {
-    color: #f59e0b;
-  }
-
-  .group-title.removed,
-  .group-title.deprecated {
-    color: #f87171;
-  }
-
-  .group-title.security {
-    color: #a78bfa;
-  }
-
-  .entries {
-    display: grid;
-    gap: 12px;
-    max-width: 46rem;
-  }
-
-  .entries li {
-    position: relative;
-    padding-left: 18px;
-    color: var(--text-muted);
-    font-size: 0.9375rem;
-    line-height: 1.7;
-  }
-
-  .entries li::before {
-    content: '';
-    position: absolute;
-    left: 2px;
-    top: 0.72em;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--border-strong);
-  }
-
-  .entries li :global(strong) {
-    color: var(--text);
-    font-weight: 600;
-  }
-
-  .entries li :global(code),
-  .release-note :global(code) {
-    padding: 2px 6px;
-    border-radius: 5px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-  }
-
-  .entries li :global(a),
-  .release-note :global(a) {
-    color: var(--accent-text);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  @media (max-width: 900px) {
-    .layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .rail {
-      position: static;
-      max-height: none;
-      padding-bottom: 24px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .rail ul {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .rail a {
-      border: 1px solid var(--border);
-    }
-
-    .rail time {
-      display: none;
-    }
-  }
-
-  @media (max-width: 560px) {
-    .release-date {
-      margin-left: 0;
-      flex-basis: 100%;
-    }
+  .page-title {
+    font-weight: 400;
   }
 </style>

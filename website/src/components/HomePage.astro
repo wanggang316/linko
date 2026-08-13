@@ -1,15 +1,6 @@
 ---
-import CopyChip from './CopyChip.astro';
-import Icon from './Icon.astro';
-import MenuBarMock from './MenuBarMock.astro';
-import {
-  APP_VERSION,
-  BREW_TAP_COMMAND,
-  GITHUB_URL,
-  LATEST_RELEASE_URL,
-  RELEASES_URL,
-} from '../lib/site';
-import { localePath, t, type Lang } from '../lib/i18n';
+import { APP_VERSION, BREW_TAP_COMMAND, LATEST_RELEASE_URL } from '../lib/site';
+import { t, type Lang } from '../lib/i18n';
 
 interface Props {
   lang: Lang;
@@ -17,574 +8,99 @@ interface Props {
 
 const { lang } = Astro.props;
 const copy = t(lang);
-const changelogHref = localePath(lang, 'changelog');
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const synopsis = copy.automation.lines
+  .map((line) => `${esc(line.cmd.padEnd(28))}<span class="c"># ${esc(line.note)}</span>`)
+  .join('\n');
 ---
 
-<section class="hero">
-  <div class="hero-bg" aria-hidden="true"></div>
+<div class="manline" aria-hidden="true">
+  <b>LINKO(1)</b>
+  <span>{copy.manCenter}</span>
+  <b>LINKO(1)</b>
+</div>
 
-  <div class="container hero-inner">
-    <div class="hero-copy">
-      <a class="pill whats-new" href={changelogHref}>
-        <span class="dot"></span>
-        <span>{copy.hero.whatsNew(APP_VERSION)}</span>
-        <Icon name="chevronRight" size={14} strokeWidth={2} />
-      </a>
-
-      <h1>
-        {copy.hero.titleLead}<br /><span class="accent">{copy.hero.titleAccent}</span>
-      </h1>
-
-      <p class="lede">{copy.hero.subtitle}</p>
-
-      <div class="hero-cta">
-        <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
-          <Icon name="download" size={18} />
-          {copy.hero.primaryCta}
-        </a>
-        <a class="btn btn-secondary" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-          <Icon name="github" size={18} />
-          {copy.hero.secondaryCta}
-        </a>
-      </div>
-
-      <p class="hero-meta">{copy.hero.meta(APP_VERSION)}</p>
-
-      <div class="hero-brew">
-        <span class="hero-brew-label">{copy.hero.brewLabel}</span>
-        <CopyChip
-          command={BREW_TAP_COMMAND}
-          copyLabel={copy.common.copy}
-          copiedLabel={copy.common.copied}
-        />
-      </div>
+<div class="man">
+  <section>
+    <h2>NAME</h2>
+    <div class="body">
+      <h1>{copy.name}</h1>
     </div>
+  </section>
 
-    <div class="hero-visual">
-      <MenuBarMock caption={copy.mock.caption} />
-    </div>
-  </div>
-</section>
-
-<section class="section" id="features">
-  <div class="container">
-    <div class="section-head" data-reveal>
-      <p class="eyebrow">{copy.features.eyebrow}</p>
-      <h2>{copy.features.title}</h2>
-      <p class="section-sub">{copy.features.subtitle}</p>
-    </div>
-
-    <ul class="feature-grid">
-      {
-        copy.features.items.map((feature, index) => (
-          <li class="feature card" data-reveal style={`transition-delay:${index * 60}ms`}>
-            <span class="feature-icon">
-              <Icon name={feature.icon as 'route'} size={19} />
-            </span>
-            <h3>{feature.title}</h3>
-            <p>{feature.body}</p>
-          </li>
-        ))
-      }
-    </ul>
-  </div>
-</section>
-
-<section class="section trust">
-  <div class="container trust-inner">
-    <div class="trust-copy" data-reveal>
-      <p class="eyebrow">{copy.trust.eyebrow}</p>
-      <h2>{copy.trust.title}</h2>
-      <p class="section-sub">{copy.trust.body}</p>
-    </div>
-
-    <ul class="trust-list" data-reveal>
-      {
-        copy.trust.items.map((item) => (
-          <li>
-            <span class="trust-mark">
-              <Icon name="check" size={13} strokeWidth={2.6} />
-            </span>
-            <span>{item}</span>
-          </li>
-        ))
-      }
-    </ul>
-  </div>
-</section>
-
-<section class="section" id="automation">
-  <div class="container automation-inner">
-    <div class="automation-copy" data-reveal>
-      <p class="eyebrow">{copy.automation.eyebrow}</p>
-      <h2>{copy.automation.title}</h2>
-      <p class="section-sub">{copy.automation.body}</p>
-      <p class="automation-hint">{copy.automation.hint}</p>
-    </div>
-
-    <div class="terminal" data-reveal>
-      <div class="terminal-bar" aria-hidden="true">
-        <span class="tl-dot"></span><span class="tl-dot"></span><span class="tl-dot"></span>
-        <span class="terminal-title">zsh — scripts/linko</span>
-      </div>
-      <ol class="terminal-body">
+  <section id="features">
+    <h2>DESCRIPTION</h2>
+    <div class="body">
+      {copy.description.map((paragraph) => <p>{paragraph}</p>)}
+      <dl class="deflist">
         {
-          copy.automation.lines.map((line) => (
-            <li>
-              <span class="prompt" aria-hidden="true">
-                $
-              </span>
-              <code>{line.cmd}</code>
-              <span class="comment"># {line.note}</span>
-            </li>
+          copy.features.map((feature) => (
+            <>
+              <dt>{feature.term}</dt>
+              <dd>{feature.text}</dd>
+            </>
           ))
         }
-      </ol>
+      </dl>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="section download" id="download">
-  <div class="container">
-    <div class="section-head" data-reveal>
-      <p class="eyebrow">{copy.download.eyebrow}</p>
-      <h2>{copy.download.title}</h2>
-      <p class="section-sub">{copy.download.subtitle}</p>
+  <section id="install">
+    <h2>INSTALL</h2>
+    <div class="body">
+      <pre class="cmd"><span class="p">$ </span>{BREW_TAP_COMMAND}</pre>
+      <p>
+        {copy.install.orDmg}
+        <a href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer"
+          >{copy.install.dmgLink(APP_VERSION)}</a
+        >
+        <span class="muted">(v{APP_VERSION})</span>
+      </p>
+      <p class="muted">{copy.install.requirements}</p>
+      <p class="muted">{copy.install.tun}</p>
+      <p class="muted">{copy.install.byo}</p>
+      {copy.install.uiLang && <p class="muted">{copy.install.uiLang}</p>}
     </div>
+  </section>
 
-    <div class="download-grid">
-      <div class="card download-card is-primary" data-reveal>
-        <span class="download-icon"><Icon name="download" size={19} /></span>
-        <h3>{copy.download.direct.title}</h3>
-        <p>{copy.download.direct.body}</p>
-        <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
-          {copy.download.direct.cta}
-          <Icon name="arrowRight" size={17} />
-        </a>
-        <p class="download-hint">{copy.download.direct.hint(APP_VERSION)}</p>
-      </div>
-
-      <div class="card download-card" data-reveal style="transition-delay:80ms">
-        <span class="download-icon"><Icon name="package" size={19} /></span>
-        <h3>{copy.download.brew.title}</h3>
-        <p>{copy.download.brew.body}</p>
-        <CopyChip
-          command={BREW_TAP_COMMAND}
-          copyLabel={copy.common.copy}
-          copiedLabel={copy.common.copied}
-        />
-        <p class="download-hint">{copy.download.brew.hint}</p>
-      </div>
+  <section id="automation">
+    <h2>SYNOPSIS</h2>
+    <div class="body">
+      <pre set:html={synopsis} />
+      <p class="muted">{copy.automation.outro}</p>
     </div>
+  </section>
 
-    <div class="requirements" data-reveal>
-      <ul>
+  <section>
+    <h2>SEE ALSO</h2>
+    <div class="body">
+      <p>
         {
-          copy.download.requirements.map((item) => (
-            <li>
-              <Icon name="shield" size={15} />
-              <span>{item}</span>
-            </li>
+          copy.seeAlso.map((link, index) => (
+            <>
+              {index > 0 && <span class="faint">{' · '}</span>}
+              <a
+                href={link.href}
+                target={link.external ? '_blank' : undefined}
+                rel={link.external ? 'noopener noreferrer' : undefined}
+              >
+                {link.label}
+              </a>
+            </>
           ))
         }
-      </ul>
-      <a class="link all-releases" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-        {copy.download.allReleases}
-        <Icon name="externalLink" size={13} strokeWidth={2} />
-      </a>
+      </p>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 
 <style>
-  /* --- hero --------------------------------------------------------------- */
-
-  .hero {
-    position: relative;
-    padding-block: clamp(56px, 8vw, 104px) clamp(56px, 7vw, 96px);
-    overflow: hidden;
+  #automation pre {
+    line-height: 1.9;
   }
 
-  .hero-bg {
-    position: absolute;
-    inset: -20% -10% auto;
-    height: 640px;
-    background: var(--glow);
-    pointer-events: none;
-  }
-
-  .hero-bg::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(to right, var(--border) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(60% 55% at 50% 40%, #000 0%, transparent 78%);
-    opacity: 0.35;
-  }
-
-  .hero-inner {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.85fr);
-    align-items: center;
-    gap: clamp(32px, 5vw, 64px);
-  }
-
-  .whats-new {
-    margin-bottom: 26px;
-    font-size: 0.8125rem;
-  }
-
-  .accent {
-    color: var(--accent-text);
-  }
-
-  .lede {
-    margin-top: 22px;
-    max-width: 34rem;
-    color: var(--text-muted);
-    font-size: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
-  }
-
-  .hero-cta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 32px;
-  }
-
-  .hero-meta {
-    margin-top: 18px;
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .hero-brew {
-    margin-top: 30px;
-    padding-top: 26px;
-    border-top: 1px solid var(--border);
-    max-width: 27rem;
-  }
-
-  .hero-brew-label {
-    display: block;
-    margin-bottom: 10px;
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-  }
-
-  .hero-visual {
-    display: flex;
-    justify-content: center;
-  }
-
-  /* --- features ----------------------------------------------------------- */
-
-  .feature-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-  }
-
-  .feature {
-    padding: 24px;
-    transition:
-      border-color 0.2s var(--ease),
-      background-color 0.2s var(--ease),
-      opacity 0.5s var(--ease),
-      transform 0.5s var(--ease);
-  }
-
-  .feature:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-2);
-  }
-
-  .feature-icon {
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
-    margin-bottom: 18px;
-    border-radius: 10px;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  .feature h3 {
-    margin-bottom: 9px;
-  }
-
-  .feature p {
-    color: var(--text-muted);
-    font-size: 0.9375rem;
-  }
-
-  /* --- trust -------------------------------------------------------------- */
-
-  .trust {
-    border-block: 1px solid var(--border);
-    background: var(--bg-soft);
-  }
-
-  .trust-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: clamp(32px, 5vw, 72px);
-    align-items: start;
-  }
-
-  .trust-copy .section-sub {
-    margin-top: 18px;
-  }
-
-  .trust-list {
-    display: grid;
-    gap: 14px;
-  }
-
-  .trust-list li {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-muted);
-    font-size: 0.9375rem;
-  }
-
-  .trust-list li:last-child {
-    border-bottom: 0;
-    padding-bottom: 0;
-  }
-
-  .trust-mark {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 22px;
-    height: 22px;
-    margin-top: 2px;
-    border-radius: 7px;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  /* --- automation --------------------------------------------------------- */
-
-  .automation-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
-    gap: clamp(32px, 5vw, 64px);
-    align-items: center;
-  }
-
-  .automation-hint {
-    margin-top: 20px;
-    color: var(--text-dim);
-    font-size: 0.8125rem;
-    max-width: 30rem;
-  }
-
-  .terminal {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--code-bg);
-    box-shadow: var(--shadow-md);
-    overflow: hidden;
-  }
-
-  .terminal-bar {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 11px 14px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.08);
-    background: rgb(255 255 255 / 0.03);
-  }
-
-  .tl-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: rgb(255 255 255 / 0.16);
-  }
-
-  .terminal-title {
-    margin-left: 8px;
-    color: #7d8798;
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-  }
-
-  .terminal-body {
-    display: grid;
-    gap: 9px;
-    padding: 18px 16px 20px;
-    overflow-x: auto;
-  }
-
-  .terminal-body li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    line-height: 1.5;
-  }
-
-  .prompt {
-    color: #22c55e;
-    user-select: none;
-  }
-
-  .terminal-body code {
-    color: #dbe2ec;
-    font-size: inherit;
-    white-space: nowrap;
-  }
-
-  .comment {
-    color: #6f7a8c;
-    font-size: 0.75rem;
-  }
-
-  /* --- download ----------------------------------------------------------- */
-
-  .download-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-  }
-
-  .download-card {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 28px;
-  }
-
-  .download-card.is-primary {
-    border-color: var(--accent-line);
-    background: linear-gradient(180deg, var(--accent-soft), transparent 55%), var(--surface);
-  }
-
-  .download-icon {
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
-    margin-bottom: 18px;
-    border-radius: 10px;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  .download-card h3 {
-    font-size: 1.1875rem;
-    margin-bottom: 9px;
-  }
-
-  .download-card > p {
-    margin-bottom: 22px;
-    color: var(--text-muted);
-    font-size: 0.9375rem;
-  }
-
-  .download-card :global(.chip) {
-    width: 100%;
-  }
-
-  .download-hint {
-    margin-top: 14px;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-  }
-
-  .requirements {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 24px;
-    margin-top: 32px;
-    padding: 24px 28px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-soft);
-  }
-
-  .requirements ul {
-    display: grid;
-    gap: 10px;
-  }
-
-  .requirements li {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-  }
-
-  .requirements li :global(svg) {
-    flex: none;
-    margin-top: 3px;
-    color: var(--text-dim);
-  }
-
-  .all-releases {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.875rem;
-    white-space: nowrap;
-  }
-
-  /* --- responsive --------------------------------------------------------- */
-
-  @media (max-width: 1000px) {
-    .feature-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 880px) {
-    .hero-inner,
-    .trust-inner,
-    .automation-inner {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .hero-visual {
-      order: -1;
-    }
-
-    .hero-brew {
-      max-width: none;
-    }
-
-    .download-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
-  @media (max-width: 620px) {
-    .feature-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .hero-cta .btn {
-      flex: 1 1 100%;
-    }
-
-    .requirements {
-      padding: 20px;
-    }
+  #automation .c {
+    color: var(--muted);
   }
 </style>
