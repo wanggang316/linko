@@ -6,6 +6,7 @@ import {
   HTML_LANG,
   LANGS,
   assetPath,
+  footerLinks,
   localePath,
   t,
   type Lang,
@@ -47,8 +48,8 @@ const home = localePath(lang);
     <link rel="alternate" hreflang="x-default" href={new URL(localePath('zh', route), Astro.site)} />
 
     <link rel="icon" type="image/svg+xml" href={assetPath('favicon.svg')} />
-    <meta name="theme-color" content="#fcfcfa" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
 
     <meta property="og:type" content="website" />
@@ -67,30 +68,41 @@ const home = localePath(lang);
   </head>
 
   <body>
-    <div class="sheet">
-      <header class="top">
+    <header class="top">
+      <div class="container top-inner">
         <a class="brand" href={home}>linko</a>
         <a href={`${home}#features`}>{copy.nav.features}</a>
-        <a href={`${home}#install`}>{copy.nav.install}</a>
+        <a href={`${home}#download`}>{copy.nav.download}</a>
         <a
           href={localePath(lang, 'changelog')}
           aria-current={route === 'changelog' ? 'page' : undefined}
         >
           {copy.nav.changelog}
         </a>
-        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">github</a>
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href={localePath(other, route)} hreflang={other} lang={other}>
           {other === 'zh' ? '中文' : 'EN'}
         </a>
-      </header>
+      </div>
+    </header>
 
-      <main>
-        <slot />
-      </main>
+    <main>
+      <slot />
+    </main>
 
-      <footer>
-        <p>{copy.license}</p>
-      </footer>
-    </div>
+    <footer>
+      <div class="container">
+        <nav class="links">
+          {
+            footerLinks(lang).map((link) => (
+              <a href={link.href} target="_blank" rel="noopener noreferrer">
+                {link.label}
+              </a>
+            ))
+          }
+        </nav>
+        <p>{copy.footer.line}</p>
+      </div>
+    </footer>
   </body>
 </html>

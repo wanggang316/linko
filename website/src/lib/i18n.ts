@@ -1,9 +1,4 @@
-import {
-  GITHUB_URL,
-  RELEASES_URL,
-  SINGBOX_URL,
-  repoFileUrl,
-} from './site';
+import { GITHUB_URL, RELEASES_URL, SINGBOX_URL, repoFileUrl } from './site';
 
 export type Lang = 'zh' | 'en';
 
@@ -27,28 +22,37 @@ export function localePath(lang: Lang, route: Route = ''): string {
 /** Path to an asset in `public/`. */
 export const assetPath = (file: string): string => `${BASE}/${file.replace(/^\//, '')}`;
 
+interface Feature {
+  kicker: string;
+  title: string;
+  body: string;
+}
+
 interface Copy {
   home: { title: string; description: string };
   changelogMeta: { title: string; description: string };
-  nav: { features: string; install: string; changelog: string };
-  manCenter: string;
-  name: string;
-  description: [string, string];
-  features: { term: string; text: string }[];
-  install: {
-    orDmg: string;
-    dmgLink: (version: string) => string;
-    requirements: string;
-    tun: string;
-    byo: string;
-    uiLang: string | null;
+  nav: { features: string; download: string; changelog: string };
+  hero: {
+    title: string;
+    lede: string;
+    download: string;
+    github: string;
+    fine: (version: string) => string;
+    shotTitle: string;
   };
-  automation: { lines: { cmd: string; note: string }[]; outro: string };
-  seeAlso: { label: string; href: string; external?: boolean }[];
-  license: string;
+  features: Feature[];
+  download: {
+    title: string;
+    lede: string;
+    cta: string;
+    allReleases: string;
+    brewLabel: string;
+    notes: string[];
+  };
+  footer: { line: string; docs: string };
   changelog: {
-    intro: string;
-    source: (link: string) => string;
+    title: string;
+    lede: string;
     unreleased: string;
     latest: string;
     untranslated: string | null;
@@ -58,81 +62,71 @@ interface Copy {
 
 const zh: Copy = {
   home: {
-    title: 'linko — 菜单栏里的 macOS 原生代理客户端',
+    title: 'linko — 菜单栏里的 macOS 代理客户端',
     description:
-      '开源的 macOS 原生代理客户端，以 sing-box 为内核：系统代理与 TUN、规则分流、连接观测、订阅与配置文件管理。GPL-3.0，全部可审计。',
+      '轻巧好用的 macOS 代理客户端：粘贴订阅、选好节点、一键开启。智能分流、流量观测、自动切换，免费开源。',
   },
   changelogMeta: {
     title: '更新日志 — linko',
-    description: 'linko 每个版本的变更记录：新增、变更与修复。',
+    description: 'linko 每个版本更新了什么：新增功能、体验改进与问题修复。',
   },
-  nav: { features: '特性', install: '安装', changelog: '更新日志' },
-  manCenter: 'macOS 用户命令',
-  name: 'linko — 把 sing-box 装进菜单栏的开源 macOS 原生代理客户端',
-  description: [
-    'SwiftUI 菜单栏常驻应用，以 sing-box 为代理内核。配置怎么生成、内核怎么启动、系统代理怎么改，源码里全都看得到——不捆绑、不推荐、不售卖任何节点或订阅。',
-    '更新经 Sparkle 分发，仅安装 EdDSA 签名校验通过的包；内核启动前先跑一遍配置预检，坏配置进不去。',
-  ],
+  nav: { features: '功能', download: '下载', changelog: '更新日志' },
+  hero: {
+    title: '菜单栏里的\n代理客户端',
+    lede: '粘贴订阅，选好节点，一键开启。分流规则、流量观测、自动切换，都在一个干净的 macOS 原生应用里。',
+    download: '免费下载',
+    github: '查看源代码',
+    fine: (v) => `v${v} · macOS 14 及以上 · Apple 芯片与 Intel · 免费开源`,
+    shotTitle: 'linko 菜单栏面板（示意）',
+  },
   features: [
-    { term: 'mode', text: '系统代理与 TUN 全局两种接管模式，同一处切换与启停。' },
     {
-      term: 'routing',
-      text: '完整规则分流：domain / ip-cidr / process / port / geoip / geosite / logical，策略组可嵌套，支持导入 Surge 与 Clash 规则，REJECT 直接拦截。',
+      kicker: '一键开启',
+      title: '点一下，就开好了',
+      body: '从菜单栏一键开关。普通模式接管浏览器等常见应用；全局模式连命令行和不走系统设置的应用也一并接管。重启电脑自动恢复上次的状态，不用每次重新设置。',
     },
     {
-      term: 'nodes',
-      text: '订阅 URL、分享链接（ss / vmess / vless / trojan / hysteria2 / tuic）或手动添加节点；多配置文件无损切换。',
+      kicker: '智能分流',
+      title: '该走的走，该直连的直连',
+      body: '用规则决定每个网站、每个应用怎么走：国外服务走代理，国内网站直连，广告域名直接拦截。改动立即生效；正在浏览的网站还能一键加规则，不用打开主界面。',
     },
     {
-      term: 'observe',
-      text: '实时连接列表（进程 / 目标 / 命中规则），速率与总量、日志导出、按应用流量统计。',
+      kicker: '流量观测',
+      title: '谁在联网，一目了然',
+      body: '哪个应用连去了哪里、命中了哪条规则、用了多少流量，实时看到。节点一键测速，慢了随时换。',
     },
     {
-      term: 'dns',
-      text: 'typed-server DNS 与 DNS 分流规则、本地 hosts 映射；按子网或网络接口自动切换配置文件。',
+      kicker: '订阅即用',
+      title: '订阅一贴就能用',
+      body: '粘贴订阅链接或节点分享链接，自动识别格式，节点立刻可用；也可以手动添加。多套配置随意切换，换个 Wi-Fi 还能按网络自动切换。',
     },
   ],
-  install: {
-    orDmg: '或下载签名并公证的 DMG：',
-    dmgLink: (v) => `Linko-${v}.dmg`,
-    requirements: 'macOS 14.0+ · Apple Silicon 与 Intel · GPL-3.0',
-    tun: 'TUN 全局模式需在「系统设置 › 通用 › 登录项与扩展」中批准系统扩展。',
-    byo: '需自备订阅或节点——linko 不内置任何节点。',
-    uiLang: null,
-  },
-  automation: {
-    lines: [
-      { cmd: 'linko on | off | toggle', note: '开 / 关 / 反转代理' },
-      { cmd: 'linko mode tun | system', note: '切换接管模式' },
-      { cmd: 'linko select "<node>"', note: '按显示名选择节点' },
-      { cmd: 'linko profile "<name>"', note: '切换配置文件' },
-      { cmd: 'linko install <url>', note: '导入订阅（应用内确认）' },
-      { cmd: 'linko test', note: '全节点延迟测试' },
-      { cmd: 'linko status', note: '内核状态与当前节点' },
+  download: {
+    title: '免费下载，开源可信',
+    lede: 'linko 完全免费、代码公开，不内置任何付费节点或推广。装好后应用会自动保持最新。',
+    cta: '下载 macOS 版',
+    allReleases: '全部版本',
+    brewLabel: '也可以用 Homebrew 安装：',
+    notes: [
+      '需要 macOS 14 及以上，Apple 芯片与 Intel 都支持。',
+      '全局模式首次使用时，需在系统设置中批准一次扩展。',
+      '需要自备订阅或节点，linko 不提供任何节点。',
     ],
-    outro:
-      '基于 linko:// URL scheme（仓库内附 scripts/linko 封装），可接入 Raycast、Alfred、快捷指令或任何 shell 脚本。',
   },
-  seeAlso: [
-    { label: 'GitHub', href: GITHUB_URL, external: true },
-    { label: 'Releases', href: RELEASES_URL, external: true },
-    { label: 'README', href: repoFileUrl('README.md'), external: true },
-    { label: '架构', href: repoFileUrl('docs/ARCHITECTURE.md'), external: true },
-    { label: '路线图', href: repoFileUrl('docs/ROADMAP.md'), external: true },
-    { label: 'sing-box', href: SINGBOX_URL, external: true },
-  ],
-  license:
-    'GPL-3.0，与内核 sing-box 的许可证兼容。sing-box © SagerNet 及其贡献者。',
+  footer: {
+    line: 'linko 是自由软件（GPL-3.0 开源），基于开源内核 sing-box 构建。',
+    docs: '文档',
+  },
   changelog: {
-    intro: '每个版本下的条目，同样是应用内更新提示里显示的说明。',
-    source: (link) => `内容来自仓库中的 ${link}，随发布流程自动同步。`,
+    title: '更新日志',
+    lede: '每个版本更新了什么。应用内的更新提示也显示同样的内容。',
     unreleased: '开发中',
-    latest: '[最新]',
+    latest: '最新版本',
     untranslated: '该版本暂无中文说明，以下为英文原文。',
     sections: {
       Added: '新增',
-      Changed: '变更',
-      Deprecated: '废弃',
+      Changed: '改进',
+      Deprecated: '即将移除',
       Removed: '移除',
       Fixed: '修复',
       Security: '安全',
@@ -142,80 +136,71 @@ const zh: Copy = {
 
 const en: Copy = {
   home: {
-    title: 'linko — a native macOS proxy client in your menu bar',
+    title: 'linko — a proxy client that lives in your menu bar',
     description:
-      'Open-source native macOS proxy client powered by sing-box: system proxy and TUN, rule-based routing, connection insight, subscriptions and profiles. GPL-3.0, fully auditable.',
+      'A friendly macOS proxy client: paste a subscription, pick a node, switch it on. Smart routing, live traffic view, automatic switching. Free and open source.',
   },
   changelogMeta: {
     title: 'Changelog — linko',
-    description: 'Every linko release: what was added, what changed and what got fixed.',
+    description: "What changed in each linko release: new features, improvements and fixes.",
   },
-  nav: { features: 'features', install: 'install', changelog: 'changelog' },
-  manCenter: 'macOS User Commands',
-  name: 'linko — an open-source native macOS proxy client that puts sing-box in the menu bar',
-  description: [
-    'A SwiftUI menu bar app with sing-box as its proxy core. How the config is generated, how the core is launched, how the system proxy is changed — it is all right there in the source. No bundled, recommended or resold nodes or subscriptions.',
-    'Updates ship through Sparkle and install only after their EdDSA signature verifies; a config pre-flight check runs before the core starts, so a bad config never launches.',
-  ],
+  nav: { features: 'Features', download: 'Download', changelog: 'Changelog' },
+  hero: {
+    title: 'A proxy client\nin your menu bar',
+    lede: 'Paste a subscription, pick a node, switch it on. Routing rules, a live traffic view and automatic switching — in one clean, native macOS app.',
+    download: 'Download free',
+    github: 'View the source',
+    fine: (v) => `v${v} · macOS 14 or later · Apple silicon & Intel · free and open source`,
+    shotTitle: 'The linko menu bar panel (illustration)',
+  },
   features: [
-    { term: 'mode', text: 'System proxy and TUN interception, switched and toggled from one place.' },
     {
-      term: 'routing',
-      text: 'Full rule-based routing: domain / ip-cidr / process / port / geoip / geosite / logical, nestable policy groups, Surge and Clash rule import, REJECT to block outright.',
+      kicker: 'One click',
+      title: 'Flip a switch, and you are through',
+      body: 'Turn the proxy on and off right from the menu bar. Standard mode covers browsers and most apps; global mode also catches terminals and apps that ignore system settings. After a reboot, linko restores itself — no re-setup.',
     },
     {
-      term: 'nodes',
-      text: 'Subscription URLs, share links (ss / vmess / vless / trojan / hysteria2 / tuic) or hand-added nodes; lossless switching between profiles.',
+      kicker: 'Smart routing',
+      title: 'The right traffic takes the right path',
+      body: 'Rules decide how each site and app connects: foreign services through the proxy, local sites directly, ad domains blocked. Changes apply instantly — and you can add a rule for the site you are on with one click.',
     },
     {
-      term: 'observe',
-      text: 'A live connection list (process / destination / matched rule), rates and totals, exportable logs, per-app traffic stats.',
+      kicker: 'Live traffic',
+      title: 'See exactly who is online',
+      body: 'Which app is connecting where, which rule it matched, how much data it used — all live. Test node speed with one click and switch whenever one slows down.',
     },
     {
-      term: 'dns',
-      text: 'Typed-server DNS with routing rules and a local hosts map; profiles switch automatically by subnet or interface.',
+      kicker: 'Paste and go',
+      title: 'Your subscription just works',
+      body: 'Paste a subscription or share link and the format is recognized — nodes are ready at once, or add them by hand. Keep several profiles and switch freely; linko can even switch by Wi-Fi network.',
     },
   ],
-  install: {
-    orDmg: 'Or download the signed, notarized DMG:',
-    dmgLink: (v) => `Linko-${v}.dmg`,
-    requirements: 'macOS 14.0+ · Apple Silicon & Intel · GPL-3.0',
-    tun: 'TUN mode needs its system extension approved in System Settings › General › Login Items & Extensions.',
-    byo: 'Bring your own subscription or nodes — linko bundles none.',
-    uiLang: 'The app interface currently ships in Chinese only.',
-  },
-  automation: {
-    lines: [
-      { cmd: 'linko on | off | toggle', note: 'turn the proxy on / off / flip it' },
-      { cmd: 'linko mode tun | system', note: 'switch the interception mode' },
-      { cmd: 'linko select "<node>"', note: 'select a node by display name' },
-      { cmd: 'linko profile "<name>"', note: 'switch the active profile' },
-      { cmd: 'linko install <url>', note: 'import a subscription (confirms in-app)' },
-      { cmd: 'linko test', note: 'run a delay test across nodes' },
-      { cmd: 'linko status', note: 'core state and current node' },
+  download: {
+    title: 'Free, and open to inspection',
+    lede: 'linko is completely free with its source in the open — no bundled paid nodes, no promotions. Once installed it keeps itself up to date.',
+    cta: 'Download for macOS',
+    allReleases: 'All releases',
+    brewLabel: 'Or install with Homebrew:',
+    notes: [
+      'Requires macOS 14 or later, on Apple silicon and Intel.',
+      'Global mode asks you to approve an extension in System Settings, once.',
+      'Bring your own subscription or nodes — linko provides none.',
+      'The app interface currently ships in Chinese.',
     ],
-    outro:
-      'Built on the linko:// URL scheme (a scripts/linko wrapper ships in the repo) — wire it into Raycast, Alfred, Shortcuts or any shell script.',
   },
-  seeAlso: [
-    { label: 'GitHub', href: GITHUB_URL, external: true },
-    { label: 'Releases', href: RELEASES_URL, external: true },
-    { label: 'README', href: repoFileUrl('README.md'), external: true },
-    { label: 'Architecture', href: repoFileUrl('docs/ARCHITECTURE.md'), external: true },
-    { label: 'Roadmap', href: repoFileUrl('docs/ROADMAP.md'), external: true },
-    { label: 'sing-box', href: SINGBOX_URL, external: true },
-  ],
-  license:
-    'GPL-3.0, compatible with the license of sing-box, the proxy core it uses. sing-box is © SagerNet and its contributors.',
+  footer: {
+    line: 'linko is free software (GPL-3.0), built on the open-source sing-box core.',
+    docs: 'Docs',
+  },
   changelog: {
-    intro: "Each release's entries double as the notes shown in the app's update dialog.",
-    source: (link) => `Sourced from ${link} in the repository, kept in sync by the release pipeline.`,
-    unreleased: 'Unreleased',
-    latest: '[latest]',
+    title: 'Changelog',
+    lede: "What changed in each release — the same notes the app shows when it updates.",
+    unreleased: 'In development',
+    latest: 'Latest',
     untranslated: null,
     sections: {
-      Added: 'Added',
-      Changed: 'Changed',
+      Added: 'New',
+      Changed: 'Improved',
       Deprecated: 'Deprecated',
       Removed: 'Removed',
       Fixed: 'Fixed',
@@ -227,3 +212,10 @@ const en: Copy = {
 const COPY: Record<Lang, Copy> = { zh, en };
 
 export const t = (lang: Lang): Copy => COPY[lang];
+
+export const footerLinks = (lang: Lang) => [
+  { label: 'GitHub', href: GITHUB_URL },
+  { label: 'Releases', href: RELEASES_URL },
+  { label: lang === 'zh' ? '使用文档' : 'Documentation', href: repoFileUrl('README.md') },
+  { label: 'sing-box', href: SINGBOX_URL },
+];

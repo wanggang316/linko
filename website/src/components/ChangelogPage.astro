@@ -1,6 +1,5 @@
 ---
 import { getReleases } from '../lib/changelog';
-import { repoFileUrl } from '../lib/site';
 import { t, type Lang } from '../lib/i18n';
 
 interface Props {
@@ -14,66 +13,42 @@ const releases = getReleases(lang);
 const anchor = (version: string) => `v${version.toLowerCase().replace(/[^a-z0-9.]+/g, '-')}`;
 const sectionLabel = (title: string) => copy.changelog.sections[title] ?? title;
 const latest = releases.find((release) => !release.unreleased)?.version;
-
-const sourceLink = `<a href="${repoFileUrl('CHANGELOG.md')}" target="_blank" rel="noopener noreferrer">CHANGELOG.md</a>`;
 ---
 
-<div class="manline" aria-hidden="true">
-  <b>LINKO-CHANGELOG(1)</b>
-  <span>{copy.manCenter}</span>
-  <b>LINKO-CHANGELOG(1)</b>
-</div>
+<div class="container">
+  <header class="page-head">
+    <h1>{copy.changelog.title}</h1>
+    <p>{copy.changelog.lede}</p>
+  </header>
 
-<div class="man">
-  <section>
-    <h2>CHANGELOG</h2>
-    <div class="body">
-      <h1 class="page-title">{copy.changelog.intro}</h1>
-      <p class="muted" set:html={copy.changelog.source(sourceLink)} />
-      <nav class="version-index muted">
-        {
-          releases.map((release) => (
-            <a href={`#${anchor(release.version)}`}>
-              {release.unreleased ? copy.changelog.unreleased : `v${release.version}`}
-            </a>
-          ))
-        }
-      </nav>
-    </div>
-  </section>
-</div>
+  {
+    releases.map((release) => (
+      <article class="release" id={anchor(release.version)}>
+        <div class="release-meta">
+          <h2>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</h2>
+          {release.date && <time datetime={release.date}>{release.date}</time>}
+          {release.version === latest && <span class="latest">{copy.changelog.latest}</span>}
+        </div>
 
-{
-  releases.map((release) => (
-    <article class="release" id={anchor(release.version)}>
-      <header class="release-head">
-        <h2>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</h2>
-        {release.date && <time datetime={release.date}>{release.date}</time>}
-        {release.version === latest && <span class="badge">{copy.changelog.latest}</span>}
-      </header>
+        <div class="release-body">
+          {release.note && <p class="note" set:html={release.note} />}
 
-      {release.note && <p class="note" set:html={release.note} />}
+          {lang === 'zh' && !release.translated && copy.changelog.untranslated && (
+            <p class="note">{copy.changelog.untranslated}</p>
+          )}
 
-      {lang === 'zh' && !release.translated && copy.changelog.untranslated && (
-        <p class="note muted">{copy.changelog.untranslated}</p>
-      )}
-
-      {release.sections.map((section) => (
-        <section class="group">
-          <h3>{sectionLabel(section.title)}</h3>
-          <ul class="entries">
-            {section.entries.map((entry) => (
-              <li set:html={entry} />
-            ))}
-          </ul>
-        </section>
-      ))}
-    </article>
-  ))
-}
-
-<style>
-  .page-title {
-    font-weight: 400;
+          {release.sections.map((section) => (
+            <section class="group">
+              <h3>{sectionLabel(section.title)}</h3>
+              <ul class="entries">
+                {section.entries.map((entry) => (
+                  <li set:html={entry} />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </article>
+    ))
   }
-</style>
+</div>

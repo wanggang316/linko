@@ -23,14 +23,14 @@ const cards = [
   {
     file: 'og.png',
     lang: 'zh-Hans',
-    headline: 'linko — 把 sing-box 装进菜单栏',
-    sub: '开源的 macOS 原生代理客户端 · 系统代理与 TUN · 规则分流 · 连接观测',
+    headline: '菜单栏里的代理客户端',
+    sub: '粘贴订阅，选好节点，一键开启。智能分流、流量观测、自动切换。',
   },
   {
     file: 'og-en.png',
     lang: 'en',
-    headline: 'linko — sing-box in your menu bar',
-    sub: 'Open-source native macOS proxy client · System proxy & TUN · Rule-based routing',
+    headline: 'A proxy client in your menu bar',
+    sub: 'Paste a subscription, pick a node, switch it on. Smart routing and a live traffic view.',
   },
 ];
 
@@ -40,29 +40,23 @@ const page = ({ lang, headline, sub }) => `<!doctype html>
   * { margin: 0; box-sizing: border-box; }
   body {
     width: 1200px; height: 630px; display: flex; flex-direction: column;
-    justify-content: space-between; padding: 64px 72px;
-    background: #fcfcfa; color: #1c1c1c;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    justify-content: center; align-items: center; text-align: center;
+    gap: 26px; padding: 60px;
+    background: #ffffff; color: #1d1d1f;
+    font-family: -apple-system, "SF Pro Display", "PingFang SC",
+      "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .manline { display: flex; justify-content: space-between; font-size: 24px;
-             color: #6e6e6a; }
-  .manline b { color: #1c1c1c; }
-  .label { font-size: 26px; font-weight: 700; letter-spacing: .08em; }
-  .headline { margin-top: 14px; padding-left: 56px; font-size: 44px;
-              font-weight: 700; line-height: 1.35; max-width: 24ch; }
-  .sub { margin-top: 22px; padding-left: 56px; font-size: 25px; color: #6e6e6a;
-         line-height: 1.6; }
-  .meta { font-size: 22px; color: #6e6e6a; border-top: 2px solid #dcdcd6;
-          padding-top: 28px; }
+  .brand { font-size: 30px; font-weight: 700; }
+  h1 { font-size: 72px; font-weight: 650; line-height: 1.15;
+       letter-spacing: -.02em; max-width: 16em; }
+  .sub { font-size: 30px; color: #6e6e73; max-width: 30em; line-height: 1.5; }
+  .meta { position: absolute; bottom: 44px; font-size: 22px; color: #a1a1a6; }
 </style>
-<div class="manline"><b>LINKO(1)</b><span>${lang === 'en' ? 'macOS User Commands' : 'macOS 用户命令'}</span><b>LINKO(1)</b></div>
-<div>
-  <div class="label">NAME</div>
-  <h1 class="headline">${headline}</h1>
-  <p class="sub">${sub}</p>
-</div>
-<div class="meta">v${version} · macOS 14.0+ · GPL-3.0 · github.com/wanggang316/linko</div>
+<div class="brand">linko</div>
+<h1>${headline}</h1>
+<p class="sub">${sub}</p>
+<div class="meta">v${version} · macOS 14+ · ${lang === 'en' ? 'free & open source' : '免费开源'} · github.com/wanggang316/linko</div>
 `;
 
 const work = mkdtempSync(join(tmpdir(), 'linko-og-'));

@@ -1,0 +1,142 @@
+---
+// The import sheet: paste anything, the format is recognized.
+---
+
+<div class="import">
+  <div class="sheet-title">导入订阅</div>
+  <div class="field">
+    <span class="ph">https://example.com/subscribe?token=****</span>
+  </div>
+  <div class="detect">
+    <i class="ok"></i>
+    <span>已识别订阅格式 · 24 个节点</span>
+  </div>
+  <ul class="preview">
+    <li><span>香港 01</span><span class="p">ss</span></li>
+    <li><span>日本 东京 02</span><span class="p">vmess</span></li>
+    <li><span>新加坡 03</span><span class="p">trojan</span></li>
+    <li class="more">… 还有 21 个</li>
+  </ul>
+  <div class="actions">
+    <span class="cancel">取消</span>
+    <span class="confirm">导入</span>
+  </div>
+</div>
+
+<style>
+  .import {
+    background: #fff;
+    border: 1px solid rgb(0 0 0 / 0.08);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 10px 30px -14px rgb(0 0 0 / 0.18);
+  }
+
+  .sheet-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+
+  .field {
+    padding: 9px 12px;
+    border: 1px solid #d9d9de;
+    border-radius: 9px;
+    background: #fafafc;
+  }
+
+  .ph {
+    color: #86868b;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detect {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 10px;
+    color: #1d883a;
+    font-size: 12px;
+  }
+
+  .ok {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #28c840;
+    position: relative;
+    flex: none;
+  }
+
+  .ok::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 2.5px;
+    width: 3.5px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(45deg);
+  }
+
+  .preview {
+    margin: 10px 0 0;
+    border: 1px solid #f0f0f3;
+    border-radius: 9px;
+    overflow: hidden;
+  }
+
+  .preview li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+
+  .preview li + li {
+    border-top: 1px solid #f6f6f8;
+  }
+
+  .preview .p {
+    color: #86868b;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+  }
+
+  .preview .more {
+    color: #86868b;
+    justify-content: flex-start;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .cancel,
+  .confirm {
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .cancel {
+    background: #f0f0f3;
+    color: #1d1d1f;
+  }
+
+  .confirm {
+    background: #0071e3;
+    color: #fff;
+  }
+</style>

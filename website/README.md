@@ -1,8 +1,10 @@
 # linko website
 
 Marketing site for linko: a landing page and a changelog page, in Chinese and
-English, typeset as a man page — monospace, paper-first, no JavaScript. Built
-with [Astro](https://astro.build) and deployed to GitHub Pages by
+English. Product-voiced copy with drawn app illustrations (`Shot*.astro` — CSS
+mockups that follow the real UI, no personal data, swappable for real
+screenshots later), no client JavaScript. Built with
+[Astro](https://astro.build) and deployed to GitHub Pages by
 `.github/workflows/pages.yml`.
 
 ```sh
@@ -47,11 +49,14 @@ After adding a release to `CHANGELOG.md`, add its Chinese entries there too.
 src/lib/          repo.ts (root files), site.ts (links, version),
                   changelog.ts (Keep-a-Changelog parser), i18n.ts (all copy)
 src/data/         changelog.zh.json — Chinese overlay for release notes
-src/components/   HomePage / ChangelogPage — the two page bodies
+src/components/   HomePage / ChangelogPage + Shot*.astro app illustrations
 src/layouts/      Base.astro — head, header, footer; no scripts
 src/styles/       global.css — the whole design; dark follows the OS
 scripts/          make-og.mjs — regenerates the social cards (see below)
 ```
+
+The app UI ships in Chinese, so the labels inside the illustrations stay
+Chinese on the English pages too — they depict the real product.
 
 ## Deployment
 

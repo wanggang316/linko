@@ -1,5 +1,11 @@
 ---
-import { APP_VERSION, BREW_TAP_COMMAND, LATEST_RELEASE_URL } from '../lib/site';
+import Shot from './Shot.astro';
+import ShotMenu from './ShotMenu.astro';
+import ShotOverview from './ShotOverview.astro';
+import ShotRules from './ShotRules.astro';
+import ShotTraffic from './ShotTraffic.astro';
+import ShotImport from './ShotImport.astro';
+import { APP_VERSION, BREW_TAP_COMMAND, LATEST_RELEASE_URL, GITHUB_URL } from '../lib/site';
 import { t, type Lang } from '../lib/i18n';
 
 interface Props {
@@ -8,99 +14,114 @@ interface Props {
 
 const { lang } = Astro.props;
 const copy = t(lang);
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const synopsis = copy.automation.lines
-  .map((line) => `${esc(line.cmd.padEnd(28))}<span class="c"># ${esc(line.note)}</span>`)
-  .join('\n');
+const [featToggle, featRules, featTraffic, featImport] = copy.features;
+const [ledeTitle, ...rest] = copy.hero.title.split('\n');
 ---
 
-<div class="manline" aria-hidden="true">
-  <b>LINKO(1)</b>
-  <span>{copy.manCenter}</span>
-  <b>LINKO(1)</b>
-</div>
+<section class="hero container">
+  <h1>{ledeTitle}<br />{rest.join(' ')}</h1>
+  <p class="lede">{copy.hero.lede}</p>
+  <div class="cta">
+    <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
+      {copy.hero.download}
+    </a>
+    <a class="btn btn-quiet" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+      {copy.hero.github} ›
+    </a>
+  </div>
+  <p class="fine">{copy.hero.fine(APP_VERSION)}</p>
 
-<div class="man">
-  <section>
-    <h2>NAME</h2>
-    <div class="body">
-      <h1>{copy.name}</h1>
-    </div>
-  </section>
+  <div class="hero-shot">
+    <Shot title={copy.hero.shotTitle} width={380}>
+      <ShotMenu />
+    </Shot>
+  </div>
+</section>
 
-  <section id="features">
-    <h2>DESCRIPTION</h2>
-    <div class="body">
-      {copy.description.map((paragraph) => <p>{paragraph}</p>)}
-      <dl class="deflist">
-        {
-          copy.features.map((feature) => (
-            <>
-              <dt>{feature.term}</dt>
-              <dd>{feature.text}</dd>
-            </>
-          ))
-        }
-      </dl>
+<section class="features container" id="features">
+  <div class="feature">
+    <div class="feature-text">
+      <p class="kicker">{featToggle.kicker}</p>
+      <h2>{featToggle.title}</h2>
+      <p>{featToggle.body}</p>
     </div>
-  </section>
+    <div class="feature-shot">
+      <Shot width={560}>
+        <ShotOverview />
+      </Shot>
+    </div>
+  </div>
 
-  <section id="install">
-    <h2>INSTALL</h2>
-    <div class="body">
-      <pre class="cmd"><span class="p">$ </span>{BREW_TAP_COMMAND}</pre>
-      <p>
-        {copy.install.orDmg}
-        <a href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer"
-          >{copy.install.dmgLink(APP_VERSION)}</a
-        >
-        <span class="muted">(v{APP_VERSION})</span>
-      </p>
-      <p class="muted">{copy.install.requirements}</p>
-      <p class="muted">{copy.install.tun}</p>
-      <p class="muted">{copy.install.byo}</p>
-      {copy.install.uiLang && <p class="muted">{copy.install.uiLang}</p>}
+  <div class="feature">
+    <div class="feature-text">
+      <p class="kicker">{featRules.kicker}</p>
+      <h2>{featRules.title}</h2>
+      <p>{featRules.body}</p>
     </div>
-  </section>
+    <div class="feature-shot">
+      <Shot width={520}>
+        <ShotRules />
+      </Shot>
+    </div>
+  </div>
 
-  <section id="automation">
-    <h2>SYNOPSIS</h2>
-    <div class="body">
-      <pre set:html={synopsis} />
-      <p class="muted">{copy.automation.outro}</p>
+  <div class="feature">
+    <div class="feature-text">
+      <p class="kicker">{featTraffic.kicker}</p>
+      <h2>{featTraffic.title}</h2>
+      <p>{featTraffic.body}</p>
     </div>
-  </section>
+    <div class="feature-shot">
+      <Shot width={560}>
+        <ShotTraffic />
+      </Shot>
+    </div>
+  </div>
 
-  <section>
-    <h2>SEE ALSO</h2>
-    <div class="body">
-      <p>
-        {
-          copy.seeAlso.map((link, index) => (
-            <>
-              {index > 0 && <span class="faint">{' · '}</span>}
-              <a
-                href={link.href}
-                target={link.external ? '_blank' : undefined}
-                rel={link.external ? 'noopener noreferrer' : undefined}
-              >
-                {link.label}
-              </a>
-            </>
-          ))
-        }
-      </p>
+  <div class="feature">
+    <div class="feature-text">
+      <p class="kicker">{featImport.kicker}</p>
+      <h2>{featImport.title}</h2>
+      <p>{featImport.body}</p>
     </div>
-  </section>
-</div>
+    <div class="feature-shot">
+      <Shot width={430}>
+        <ShotImport />
+      </Shot>
+    </div>
+  </div>
+</section>
+
+<section class="download" id="download">
+  <div class="container">
+    <h2>{copy.download.title}</h2>
+    <p class="lede">{copy.download.lede}</p>
+    <div class="cta">
+      <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
+        {copy.download.cta}
+      </a>
+      <a
+        class="btn btn-quiet"
+        href={`${GITHUB_URL}/releases`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {copy.download.allReleases} ›
+      </a>
+    </div>
+    <div>
+      <p class="fine-label muted">{copy.download.brewLabel}</p>
+      <code class="brew">{BREW_TAP_COMMAND}</code>
+    </div>
+    <div class="notes">
+      {copy.download.notes.map((note) => <p>{note}</p>)}
+    </div>
+  </div>
+</section>
 
 <style>
-  #automation pre {
-    line-height: 1.9;
-  }
-
-  #automation .c {
-    color: var(--muted);
+  .fine-label {
+    margin-top: 34px;
+    font-size: 0.85rem;
   }
 </style>
