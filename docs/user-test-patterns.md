@@ -58,7 +58,7 @@
 - **Fallback:** 无
 - **Invocation:** `make gen && make test-app`
 - **Ready signal:** 编译通过即绪；无签名可跑
-- **已知坑:** xcodebuild（`make build`/`make test-app`）会把 app 的 Sparkle pin 顺带写进 `packages/LinkoKit/Package.resolved`；属 incidental churn，提交前还原该文件。
+- **已知坑:** xcodebuild（`make build`/`make test-app`）会把 app 的 Sparkle pin 顺带写进 `packages/LinkoKit/Package.resolved`，而单独 `swift test` 又会把它剪掉；该文件已不再入库（gitignored），无需手动还原。
 - **Cost tier:** cheap-medium（xcodebuild 首跑编译较慢）
 
 ## Case Dimensions

@@ -12,4 +12,7 @@ vendor/
 
 # SwiftPM
 .swiftpm/
+# Local packages' Package.resolved ping-pongs between resolvers: xcodebuild
+# writes the app-level Sparkle pin into it, standalone `swift test` prunes it.
+packages/*/Package.resolved
 .harness-runtime/
