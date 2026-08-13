@@ -1,0 +1,314 @@
+---
+import Icon from './Icon.astro';
+import Logo from './Logo.astro';
+import { GITHUB_URL, repoFileUrl } from '../lib/site';
+import { LANGS, localePath, t, type Lang, type Route } from '../lib/i18n';
+
+interface Props {
+  lang: Lang;
+  route: Route;
+}
+
+const { lang, route } = Astro.props;
+const copy = t(lang);
+const home = localePath(lang);
+const other = LANGS.find((l) => l !== lang)!;
+
+const links = [
+  { href: `${home}#features`, label: copy.nav.features },
+  { href: `${home}#automation`, label: copy.nav.automation },
+  { href: `${home}#download`, label: copy.nav.download },
+  { href: localePath(lang, 'changelog'), label: copy.nav.changelog, current: route === 'changelog' },
+  { href: repoFileUrl('README.md'), label: copy.nav.docs, external: true },
+];
+---
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href={home} aria-label="linko">
+      <Logo size={26} />
+      <span>linko</span>
+    </a>
+
+    <nav class="nav-desktop" aria-label={copy.nav.menu}>
+      {
+        links.map((link) => (
+          <a
+            href={link.href}
+            class="nav-link"
+            aria-current={link.current ? 'page' : undefined}
+            target={link.external ? '_blank' : undefined}
+            rel={link.external ? 'noopener noreferrer' : undefined}
+          >
+            {link.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <div class="header-actions">
+      <a
+        class="lang-switch"
+        href={localePath(other, route)}
+        hreflang={other}
+        lang={other}
+        title={copy.nav.language}
+      >
+        <Icon name="languages" size={15} />
+        <span>{other === 'zh' ? '中文' : 'EN'}</span>
+      </a>
+
+      <button class="icon-btn" type="button" data-theme-toggle aria-label={copy.nav.theme}>
+        <span class="theme-icon theme-icon-dark"><Icon name="moon" size={18} /></span>
+        <span class="theme-icon theme-icon-light"><Icon name="sun" size={18} /></span>
+      </button>
+
+      <a
+        class="icon-btn hide-sm"
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="GitHub"
+      >
+        <Icon name="github" size={18} />
+      </a>
+
+      <button
+        class="icon-btn nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+        aria-label={copy.nav.menu}
+        data-nav-toggle
+      >
+        <span class="nav-icon-open"><Icon name="menu" size={20} /></span>
+        <span class="nav-icon-close"><Icon name="close" size={20} /></span>
+      </button>
+    </div>
+  </div>
+
+  <nav class="mobile-nav" id="mobile-nav" aria-label={copy.nav.menu} hidden>
+    <div class="container mobile-nav-inner">
+      {
+        links.map((link) => (
+          <a
+            href={link.href}
+            class="mobile-nav-link"
+            target={link.external ? '_blank' : undefined}
+            rel={link.external ? 'noopener noreferrer' : undefined}
+          >
+            <span>{link.label}</span>
+            <Icon name={link.external ? 'externalLink' : 'chevronRight'} size={16} />
+          </a>
+        ))
+      }
+      <a class="mobile-nav-link" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+        <span>GitHub</span>
+        <Icon name="externalLink" size={16} />
+      </a>
+    </div>
+  </nav>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--header-bg);
+    border-bottom: 1px solid transparent;
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    transition: border-color 0.2s var(--ease);
+  }
+
+  .site-header.is-scrolled {
+    border-bottom-color: var(--border);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: var(--header-h);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin-right: auto;
+    font-size: 1.0625rem;
+    font-weight: 640;
+    letter-spacing: -0.02em;
+  }
+
+  .nav-desktop {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .nav-link {
+    padding: 7px 11px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 0.9063rem;
+    font-weight: 480;
+    transition:
+      color 0.18s var(--ease),
+      background-color 0.18s var(--ease);
+  }
+
+  .nav-link:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .nav-link[aria-current='page'] {
+    color: var(--text);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+  }
+
+  .lang-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 520;
+    transition:
+      color 0.18s var(--ease),
+      border-color 0.18s var(--ease),
+      background-color 0.18s var(--ease);
+  }
+
+  .lang-switch:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+  }
+
+  .icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition:
+      color 0.18s var(--ease),
+      background-color 0.18s var(--ease);
+  }
+
+  .icon-btn:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  /* Tap area stays 44px even though the visual chip is 34px. */
+  .icon-btn::after,
+  .lang-switch::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+  }
+
+  .icon-btn,
+  .lang-switch {
+    position: relative;
+  }
+
+  .theme-icon,
+  .nav-icon-open,
+  .nav-icon-close {
+    display: grid;
+    place-items: center;
+  }
+
+  .theme-icon-light,
+  .nav-icon-close {
+    display: none;
+  }
+
+  :global(html[data-theme='light']) .theme-icon-dark {
+    display: none;
+  }
+
+  :global(html[data-theme='light']) .theme-icon-light {
+    display: grid;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :global(html:not([data-theme='dark'])) .theme-icon-dark {
+      display: none;
+    }
+
+    :global(html:not([data-theme='dark'])) .theme-icon-light {
+      display: grid;
+    }
+  }
+
+  .nav-toggle {
+    display: none;
+  }
+
+  .site-header.nav-open .nav-icon-open {
+    display: none;
+  }
+
+  .site-header.nav-open .nav-icon-close {
+    display: grid;
+  }
+
+  .mobile-nav {
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .mobile-nav-inner {
+    display: grid;
+    padding-block: 8px 16px;
+  }
+
+  .mobile-nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 4px 2px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mobile-nav-link:last-child {
+    border-bottom: 0;
+  }
+
+  .mobile-nav-link:hover {
+    color: var(--text);
+  }
+
+  @media (max-width: 860px) {
+    .nav-desktop,
+    .hide-sm {
+      display: none;
+    }
+
+    .nav-toggle {
+      display: inline-grid;
+    }
+  }
+</style>

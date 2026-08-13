@@ -1,0 +1,179 @@
+---
+import '@fontsource-variable/inter';
+import '../styles/global.css';
+
+import SiteHeader from '../components/SiteHeader.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import { HTML_LANG, LANGS, assetPath, localePath, type Lang, type Route } from '../lib/i18n';
+
+interface Props {
+  lang: Lang;
+  route: Route;
+  title: string;
+  description: string;
+}
+
+const { lang, route, title, description } = Astro.props;
+const canonical = new URL(localePath(lang, route), Astro.site);
+const ogImage = new URL(assetPath(lang === 'zh' ? 'og.png' : 'og-en.png'), Astro.site);
+---
+
+<!doctype html>
+<html lang={HTML_LANG[lang]}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {
+      LANGS.map((l) => (
+        <link
+          rel="alternate"
+          hreflang={HTML_LANG[l]}
+          href={new URL(localePath(l, route), Astro.site)}
+        />
+      ))
+    }
+    <link rel="alternate" hreflang="x-default" href={new URL(localePath('zh', route), Astro.site)} />
+
+    <link rel="icon" type="image/svg+xml" href={assetPath('favicon.svg')} />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#090b10" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="dark light" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="linko" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={title} />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <meta name="generator" content={Astro.generator} />
+
+    {/* Applies the stored theme before first paint so there is no flash, and
+        marks the document as scripted so scroll-reveal can safely start hidden. */}
+    <script is:inline>
+      document.documentElement.classList.add('js');
+      try {
+        const stored = localStorage.getItem('linko-theme');
+        if (stored === 'light' || stored === 'dark') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch {
+        /* private mode: fall back to the OS preference */
+      }
+    </script>
+  </head>
+
+  <body>
+    <a class="skip-link" href="#main">{lang === 'zh' ? '跳到主要内容' : 'Skip to main content'}</a>
+    <SiteHeader lang={lang} route={route} />
+    <main id="main">
+      <slot />
+    </main>
+    <SiteFooter lang={lang} />
+
+    <p class="visually-hidden" role="status" aria-live="polite" data-copy-status></p>
+
+    <script>
+      const root = document.documentElement;
+
+      // Theme -------------------------------------------------------------
+      const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const activeTheme = () =>
+        root.dataset.theme ?? (darkQuery.matches ? 'dark' : 'light');
+
+      document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const next = activeTheme() === 'dark' ? 'light' : 'dark';
+          root.dataset.theme = next;
+          try {
+            localStorage.setItem('linko-theme', next);
+          } catch {
+            /* ignore */
+          }
+        });
+      });
+
+      // Header ------------------------------------------------------------
+      const header = document.querySelector<HTMLElement>('.site-header');
+      const navToggle = document.querySelector<HTMLButtonElement>('[data-nav-toggle]');
+      const mobileNav = document.getElementById('mobile-nav');
+
+      if (header) {
+        const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 4);
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+      }
+
+      if (header && navToggle && mobileNav) {
+        const setOpen = (open: boolean) => {
+          navToggle.setAttribute('aria-expanded', String(open));
+          mobileNav.hidden = !open;
+          header.classList.toggle('nav-open', open);
+        };
+        navToggle.addEventListener('click', () =>
+          setOpen(navToggle.getAttribute('aria-expanded') !== 'true'),
+        );
+        mobileNav.addEventListener('click', (event) => {
+          if ((event.target as HTMLElement).closest('a')) setOpen(false);
+        });
+        window.matchMedia('(min-width: 861px)').addEventListener('change', (event) => {
+          if (event.matches) setOpen(false);
+        });
+      }
+
+      // Copy buttons ------------------------------------------------------
+      const status = document.querySelector<HTMLElement>('[data-copy-status]');
+
+      document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => {
+        const label = button.querySelector<HTMLElement>('[data-copy-label]');
+        const idle = label?.textContent ?? '';
+        const done = button.dataset.copiedLabel ?? idle;
+        let timer: number | undefined;
+
+        button.addEventListener('click', async () => {
+          const text = button.dataset.copy ?? '';
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            return;
+          }
+          button.classList.add('is-copied');
+          if (label) label.textContent = done;
+          if (status) status.textContent = done;
+          window.clearTimeout(timer);
+          timer = window.setTimeout(() => {
+            button.classList.remove('is-copied');
+            if (label) label.textContent = idle;
+            if (status) status.textContent = '';
+          }, 2000);
+        });
+      });
+
+      // Reveal on scroll --------------------------------------------------
+      const targets = document.querySelectorAll('[data-reveal]');
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        targets.forEach((el) => el.classList.add('is-visible'));
+      } else {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (!entry.isIntersecting) return;
+              entry.target.classList.add('is-visible');
+              observer.unobserve(entry.target);
+            });
+          },
+          { rootMargin: '0px 0px -8% 0px', threshold: 0.08 },
+        );
+        targets.forEach((el) => observer.observe(el));
+      }
+    </script>
+  </body>
+</html>

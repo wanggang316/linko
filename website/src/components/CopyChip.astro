@@ -1,0 +1,99 @@
+---
+import Icon from './Icon.astro';
+
+interface Props {
+  command: string;
+  copyLabel: string;
+  copiedLabel: string;
+}
+
+const { command, copyLabel, copiedLabel } = Astro.props;
+---
+
+<div class="chip">
+  <code>{command}</code>
+  <button
+    type="button"
+    class="copy"
+    data-copy={command}
+    data-copied-label={copiedLabel}
+    aria-label={`${copyLabel} — ${command}`}
+  >
+    <span class="glyph glyph-idle"><Icon name="copy" size={14} strokeWidth={2} /></span>
+    <span class="glyph glyph-done"><Icon name="check" size={14} strokeWidth={2.4} /></span>
+    <span data-copy-label>{copyLabel}</span>
+  </button>
+</div>
+
+<style>
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 5px 5px 5px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+
+  code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    scrollbar-width: none;
+  }
+
+  code::-webkit-scrollbar {
+    display: none;
+  }
+
+  .copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 520;
+    transition:
+      color 0.18s var(--ease),
+      border-color 0.18s var(--ease);
+  }
+
+  .copy:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .copy.is-copied {
+    color: var(--accent-text);
+    border-color: var(--accent-line);
+  }
+
+  .glyph {
+    display: grid;
+    place-items: center;
+  }
+
+  .glyph-done {
+    display: none;
+  }
+
+  .copy.is-copied .glyph-idle {
+    display: none;
+  }
+
+  .copy.is-copied .glyph-done {
+    display: grid;
+  }
+</style>
