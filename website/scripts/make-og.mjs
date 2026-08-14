@@ -23,13 +23,13 @@ const cards = [
   {
     file: 'og.png',
     lang: 'zh-Hans',
-    headline: '菜单栏里的代理客户端',
+    headline: '代理，本该这么简单',
     sub: '粘贴订阅，选好节点，一键开启。智能分流、流量观测、自动切换。',
   },
   {
     file: 'og-en.png',
     lang: 'en',
-    headline: 'A proxy client in your menu bar',
+    headline: 'A proxy client, made simple',
     sub: 'Paste a subscription, pick a node, switch it on. Smart routing and a live traffic view.',
   },
 ];

@@ -62,9 +62,9 @@ interface Copy {
 
 const zh: Copy = {
   home: {
-    title: 'linko — 菜单栏里的 macOS 代理客户端',
+    title: 'linko — 简单可靠的 macOS 代理客户端',
     description:
-      '轻巧好用的 macOS 代理客户端：粘贴订阅、选好节点、一键开启。智能分流、流量观测、自动切换，免费开源。',
+      '简单可靠的 macOS 代理客户端：粘贴订阅、选好节点、一键开启。智能分流、流量观测、自动切换，免费开源。',
   },
   changelogMeta: {
     title: '更新日志 — linko',
@@ -72,12 +72,12 @@ const zh: Copy = {
   },
   nav: { features: '功能', download: '下载', changelog: '更新日志' },
   hero: {
-    title: '菜单栏里的\n代理客户端',
+    title: '代理，本该\n这么简单',
     lede: '粘贴订阅，选好节点，一键开启。分流规则、流量观测、自动切换，都在一个干净的 macOS 原生应用里。',
     download: '免费下载',
     github: '查看源代码',
     fine: (v) => `v${v} · macOS 14 及以上 · Apple 芯片与 Intel · 免费开源`,
-    shotTitle: 'linko 菜单栏面板（示意）',
+    shotTitle: 'linko 主面板（示意）',
   },
   features: [
     {
@@ -136,9 +136,9 @@ const zh: Copy = {
 
 const en: Copy = {
   home: {
-    title: 'linko — a proxy client that lives in your menu bar',
+    title: 'linko — the simple, reliable proxy client for macOS',
     description:
-      'A friendly macOS proxy client: paste a subscription, pick a node, switch it on. Smart routing, live traffic view, automatic switching. Free and open source.',
+      'A simple, reliable macOS proxy client: paste a subscription, pick a node, switch it on. Smart routing, live traffic view, automatic switching. Free and open source.',
   },
   changelogMeta: {
     title: 'Changelog — linko',
@@ -146,12 +146,12 @@ const en: Copy = {
   },
   nav: { features: 'Features', download: 'Download', changelog: 'Changelog' },
   hero: {
-    title: 'A proxy client\nin your menu bar',
+    title: 'A proxy client,\nmade simple',
     lede: 'Paste a subscription, pick a node, switch it on. Routing rules, a live traffic view and automatic switching — in one clean, native macOS app.',
     download: 'Download free',
     github: 'View the source',
     fine: (v) => `v${v} · macOS 14 or later · Apple silicon & Intel · free and open source`,
-    shotTitle: 'The linko menu bar panel (illustration)',
+    shotTitle: 'The linko panel (illustration)',
   },
   features: [
     {

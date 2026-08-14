@@ -19,17 +19,19 @@ const [ledeTitle, ...rest] = copy.hero.title.split('\n');
 ---
 
 <section class="hero container">
-  <h1>{ledeTitle}<br />{rest.join(' ')}</h1>
-  <p class="lede">{copy.hero.lede}</p>
-  <div class="cta">
-    <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
-      {copy.hero.download}
-    </a>
-    <a class="btn btn-quiet" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-      {copy.hero.github} ›
-    </a>
+  <div class="hero-copy">
+    <h1>{ledeTitle}<br />{rest.join(' ')}</h1>
+    <p class="lede">{copy.hero.lede}</p>
+    <div class="cta">
+      <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
+        {copy.hero.download}
+      </a>
+      <a class="btn btn-quiet" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+        {copy.hero.github} ›
+      </a>
+    </div>
+    <p class="fine">{copy.hero.fine(APP_VERSION)}</p>
   </div>
-  <p class="fine">{copy.hero.fine(APP_VERSION)}</p>
 
   <div class="hero-shot">
     <Shot title={copy.hero.shotTitle} width={380}>
