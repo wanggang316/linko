@@ -1,9 +1,10 @@
 name: pages
 
-# Builds the marketing site in `website/` and publishes it to GitHub Pages.
-# The site reads CHANGELOG.md and project.yml from the repository root at build
-# time, so a release commit republishes the changelog and the version on its
-# own. Enable once in Settings › Pages by setting the source to GitHub Actions.
+# Builds the marketing site in `apps/website/` and publishes it to GitHub
+# Pages. The site reads CHANGELOG.md and project.yml from the repository root
+# at build time, so a release commit republishes the changelog and the version
+# on its own. configure-pages enables the Pages site (GitHub Actions source)
+# on first run.
 
 on:
   push:
@@ -55,6 +56,8 @@ jobs:
         run: npm run build
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
