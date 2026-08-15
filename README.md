@@ -5,7 +5,7 @@ linko is an open-source macOS menu bar proxy client built with SwiftUI, using
 Clash YAML subscription import, node selection with latency testing, and
 one-click macOS system proxy toggling.
 
-- Website: <https://gumpw.com/linko/> (built from `apps/website/`)
+- Website: <https://linko.gumpw.com/> (built from `apps/website/`)
 - macOS 14.0+, Apple Silicon & Intel
 - Menu bar only (no Dock icon)
 - Milestone 1 runs sing-box as a subprocess; TUN/NetworkExtension mode is

@@ -8,7 +8,7 @@ English. Product-voiced copy with real app screenshots
 
 ```sh
 npm install
-npm run dev      # http://localhost:4321/linko/
+npm run dev      # http://localhost:4321/
 npm run check    # astro check (types)
 npm run build    # -> dist/
 npm run preview  # serve dist/
@@ -60,13 +60,13 @@ pages too — they depict the real product.
 
 ## Deployment
 
-The default build targets the project page `https://gumpw.com/linko/` — the
-account's Pages custom domain, which the `*.github.io` URL redirects to. To
-move to a dedicated domain, override both variables and add a `CNAME` file to
-`public/`:
+The default build targets `https://linko.gumpw.com/`, the custom domain set
+in the repo's Pages settings (`linko.gumpw.com` is a CNAME to
+`wanggang316.github.io`; the `*.github.io` URL redirects). For another
+domain, change the Pages setting and override:
 
 ```sh
-SITE_URL=https://example.com SITE_BASE=/ npm run build
+SITE_URL=https://example.com npm run build
 ```
 
 ## Social preview images
