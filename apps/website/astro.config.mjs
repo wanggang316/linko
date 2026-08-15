@@ -1,13 +1,12 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 
-// Deployed to GitHub Pages as a project site. The account carries the
-// custom domain gumpw.com, so the project page is served at
-// https://gumpw.com/linko/ (the *.github.io URL redirects there).
-// Override both when moving to a dedicated domain, e.g.
-//   SITE_URL=https://linko.app SITE_BASE=/ npm run build
-const site = process.env.SITE_URL ?? 'https://gumpw.com';
-const base = process.env.SITE_BASE ?? '/linko';
+// Deployed to GitHub Pages under the project's custom domain
+// https://linko.gumpw.com/ (set in the repo's Pages settings; the
+// *.github.io URL redirects there). Override for another domain, e.g.
+//   SITE_URL=https://linko.app npm run build
+const site = process.env.SITE_URL ?? 'https://linko.gumpw.com';
+const base = process.env.SITE_BASE ?? '/';
 
 // https://astro.build/config
 export default defineConfig({
