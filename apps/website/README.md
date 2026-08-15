@@ -60,9 +60,10 @@ pages too — they depict the real product.
 
 ## Deployment
 
-The default build targets the project page
-`https://wanggang316.github.io/linko/`. To move to a custom domain, override
-both variables and add a `CNAME` file to `public/`:
+The default build targets the project page `https://gumpw.com/linko/` — the
+account's Pages custom domain, which the `*.github.io` URL redirects to. To
+move to a dedicated domain, override both variables and add a `CNAME` file to
+`public/`:
 
 ```sh
 SITE_URL=https://example.com SITE_BASE=/ npm run build
