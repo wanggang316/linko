@@ -62,9 +62,9 @@ interface Copy {
 
 const zh: Copy = {
   home: {
-    title: 'linko — 简单可靠的 macOS 代理客户端',
+    title: 'linko — 简单、稳定的全功能 macOS 代理客户端',
     description:
-      '简单可靠的 macOS 代理客户端：粘贴订阅、选好节点、一键开启。智能分流、流量观测、自动切换，免费开源。',
+      '简单、稳定的全功能 macOS 代理客户端：订阅导入、规则分流、流量观测、按网络自动切换配置。免费开源。',
   },
   changelogMeta: {
     title: '更新日志 — linko',
@@ -72,12 +72,12 @@ const zh: Copy = {
   },
   nav: { features: '功能', download: '下载', changelog: '更新日志' },
   hero: {
-    title: '代理，本该\n这么简单',
-    lede: '粘贴订阅，选好节点，一键开启。分流规则、流量观测、自动切换，都在一个干净的 macOS 原生应用里。',
+    title: '简单、稳定的\n全功能代理客户端',
+    lede: '订阅导入、规则分流、流量观测、按网络自动切换，macOS 原生应用。',
     download: '免费下载',
     github: '查看源代码',
     fine: (v) => `v${v} · macOS 14 及以上 · Apple 芯片与 Intel · 免费开源`,
-    shotTitle: 'linko 主面板（示意）',
+    shotTitle: 'linko 菜单栏面板',
   },
   features: [
     {
@@ -87,7 +87,7 @@ const zh: Copy = {
     },
     {
       kicker: '智能分流',
-      title: '该走的走，该直连的直连',
+      title: '该走的走，该拦的拦',
       body: '用规则决定每个网站、每个应用怎么走：国外服务走代理，国内网站直连，广告域名直接拦截。改动立即生效；正在浏览的网站还能一键加规则，不用打开主界面。',
     },
     {
@@ -96,9 +96,14 @@ const zh: Copy = {
       body: '哪个应用连去了哪里、命中了哪条规则、用了多少流量，实时看到。节点一键测速，慢了随时换。',
     },
     {
-      kicker: '订阅即用',
+      kicker: '订阅与配置',
       title: '订阅一贴就能用',
-      body: '粘贴订阅链接或节点分享链接，自动识别格式，节点立刻可用；也可以手动添加。多套配置随意切换，换个 Wi-Fi 还能按网络自动切换。',
+      body: '粘贴订阅链接或节点分享链接，自动识别格式，节点立刻可用；也可以手动添加。多套配置随意切换，回到家、到公司，还能按所在网络自动换配置。',
+    },
+    {
+      kicker: '日志',
+      title: '出了问题，查得到',
+      body: '完整的运行日志随时查看、过滤、导出。每条连接走了哪个节点、命中了哪条规则，都有迹可循。',
     },
   ],
   download: {
@@ -136,9 +141,9 @@ const zh: Copy = {
 
 const en: Copy = {
   home: {
-    title: 'linko — the simple, reliable proxy client for macOS',
+    title: 'linko — a simple, stable, full-featured proxy client for macOS',
     description:
-      'A simple, reliable macOS proxy client: paste a subscription, pick a node, switch it on. Smart routing, live traffic view, automatic switching. Free and open source.',
+      'A simple, stable, full-featured macOS proxy client: subscription import, rule-based routing, live traffic view, per-network profile switching. Free and open source.',
   },
   changelogMeta: {
     title: 'Changelog — linko',
@@ -146,12 +151,12 @@ const en: Copy = {
   },
   nav: { features: 'Features', download: 'Download', changelog: 'Changelog' },
   hero: {
-    title: 'A proxy client,\nmade simple',
-    lede: 'Paste a subscription, pick a node, switch it on. Routing rules, a live traffic view and automatic switching — in one clean, native macOS app.',
+    title: 'A simple, stable,\nfull-featured proxy client',
+    lede: 'Subscription import, rule-based routing, a live traffic view and per-network switching — in one native macOS app.',
     download: 'Download free',
     github: 'View the source',
     fine: (v) => `v${v} · macOS 14 or later · Apple silicon & Intel · free and open source`,
-    shotTitle: 'The linko panel (illustration)',
+    shotTitle: 'The linko menu bar panel',
   },
   features: [
     {
@@ -170,9 +175,14 @@ const en: Copy = {
       body: 'Which app is connecting where, which rule it matched, how much data it used — all live. Test node speed with one click and switch whenever one slows down.',
     },
     {
-      kicker: 'Paste and go',
+      kicker: 'Subscriptions & profiles',
       title: 'Your subscription just works',
-      body: 'Paste a subscription or share link and the format is recognized — nodes are ready at once, or add them by hand. Keep several profiles and switch freely; linko can even switch by Wi-Fi network.',
+      body: 'Paste a subscription or share link and the format is recognized — nodes are ready at once, or add them by hand. Keep several profiles and switch freely; linko can even switch by the network you are on.',
+    },
+    {
+      kicker: 'Logs',
+      title: "When something's off, you can see why",
+      body: 'Full runtime logs to browse, filter and export — every connection, the node it took and the rule that sent it there.',
     },
   ],
   download: {

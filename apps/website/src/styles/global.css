@@ -89,10 +89,15 @@ h3 {
   text-wrap: balance;
 }
 
-/* `balance` breaks CJK headlines mid-word; natural filling reads better. */
+/* `balance` breaks CJK headlines mid-word; natural filling reads better.
+   CJK glyphs also run wider than Latin, so the display size steps down. */
 :lang(zh-Hans) h2,
 :lang(zh-Hans) h3 {
   text-wrap: initial;
+}
+
+:lang(zh-Hans) h1 {
+  font-size: clamp(2.3rem, 1.5rem + 3vw, 3.6rem);
 }
 
 h1 {
@@ -234,6 +239,24 @@ p {
   min-width: 0;
 }
 
+/* Real app screenshots. They carry their own rounded window corners in the
+   alpha channel, so the shadow follows the shape via drop-shadow. */
+.shot-img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 24px 48px rgb(0 0 0 / 0.24));
+}
+
+.hero-img {
+  max-width: 340px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .shot-img {
+    filter: drop-shadow(0 24px 48px rgb(0 0 0 / 0.7));
+  }
+}
+
 /* --- feature rows ------------------------------------------------------------ */
 
 .features {
@@ -246,6 +269,12 @@ p {
   align-items: center;
   gap: clamp(28px, 5vw, 72px);
   padding-block: clamp(40px, 6vw, 80px);
+}
+
+/* Even rows put the shot on the left — swap the column widths with it, so
+   the image always gets the wide track. */
+.feature:nth-child(even) {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
 }
 
 .feature:nth-child(even) .feature-text {

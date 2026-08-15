@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const version =
-  readFileSync(resolve(root, '..', 'project.yml'), 'utf8').match(
+  readFileSync(resolve(root, '..', '..', 'project.yml'), 'utf8').match(
     /^[ \t]*MARKETING_VERSION:[ \t]*"?([0-9][^"\s]*)"?/m,
   )?.[1] ?? '0.0.0';
 
@@ -23,14 +23,14 @@ const cards = [
   {
     file: 'og.png',
     lang: 'zh-Hans',
-    headline: '代理，本该这么简单',
-    sub: '粘贴订阅，选好节点，一键开启。智能分流、流量观测、自动切换。',
+    headline: '简单、稳定的全功能代理客户端',
+    sub: '订阅导入、规则分流、流量观测、按网络自动切换，macOS 原生应用。',
   },
   {
     file: 'og-en.png',
     lang: 'en',
-    headline: 'A proxy client, made simple',
-    sub: 'Paste a subscription, pick a node, switch it on. Smart routing and a live traffic view.',
+    headline: 'A simple, stable, full-featured proxy client',
+    sub: 'Subscription import, rule-based routing and a live traffic view, native on macOS.',
   },
 ];
 

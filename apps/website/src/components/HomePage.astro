@@ -1,12 +1,6 @@
 ---
-import Shot from './Shot.astro';
-import ShotMenu from './ShotMenu.astro';
-import ShotOverview from './ShotOverview.astro';
-import ShotRules from './ShotRules.astro';
-import ShotTraffic from './ShotTraffic.astro';
-import ShotImport from './ShotImport.astro';
 import { APP_VERSION, BREW_TAP_COMMAND, LATEST_RELEASE_URL, GITHUB_URL } from '../lib/site';
-import { t, type Lang } from '../lib/i18n';
+import { assetPath, t, type Lang } from '../lib/i18n';
 
 interface Props {
   lang: Lang;
@@ -14,8 +8,17 @@ interface Props {
 
 const { lang } = Astro.props;
 const copy = t(lang);
-const [featToggle, featRules, featTraffic, featImport] = copy.features;
 const [ledeTitle, ...rest] = copy.hero.title.split('\n');
+
+// Real app screenshots (public/screenshots/, dark appearance, @2x), paired
+// positionally with the feature copy in i18n.ts.
+const shots = [
+  { src: 'screenshots/2.png', width: 957, height: 693 }, // overview: toggle + modes
+  { src: 'screenshots/4.png', width: 957, height: 693 }, // routing rules
+  { src: 'screenshots/3.png', width: 957, height: 693 }, // connections
+  { src: 'screenshots/5.png', width: 993, height: 729 }, // network environment
+  { src: 'screenshots/6.png', width: 957, height: 693 }, // logs
+];
 ---
 
 <section class="hero container">
@@ -34,64 +37,39 @@ const [ledeTitle, ...rest] = copy.hero.title.split('\n');
   </div>
 
   <div class="hero-shot">
-    <Shot title={copy.hero.shotTitle} width={380}>
-      <ShotMenu />
-    </Shot>
+    <img
+      class="shot-img hero-img"
+      src={assetPath('screenshots/1.png')}
+      alt={copy.hero.shotTitle}
+      width="320"
+      height="354"
+      fetchpriority="high"
+    />
   </div>
 </section>
 
 <section class="features container" id="features">
-  <div class="feature">
-    <div class="feature-text">
-      <p class="kicker">{featToggle.kicker}</p>
-      <h2>{featToggle.title}</h2>
-      <p>{featToggle.body}</p>
-    </div>
-    <div class="feature-shot">
-      <Shot width={560}>
-        <ShotOverview />
-      </Shot>
-    </div>
-  </div>
-
-  <div class="feature">
-    <div class="feature-text">
-      <p class="kicker">{featRules.kicker}</p>
-      <h2>{featRules.title}</h2>
-      <p>{featRules.body}</p>
-    </div>
-    <div class="feature-shot">
-      <Shot width={520}>
-        <ShotRules />
-      </Shot>
-    </div>
-  </div>
-
-  <div class="feature">
-    <div class="feature-text">
-      <p class="kicker">{featTraffic.kicker}</p>
-      <h2>{featTraffic.title}</h2>
-      <p>{featTraffic.body}</p>
-    </div>
-    <div class="feature-shot">
-      <Shot width={560}>
-        <ShotTraffic />
-      </Shot>
-    </div>
-  </div>
-
-  <div class="feature">
-    <div class="feature-text">
-      <p class="kicker">{featImport.kicker}</p>
-      <h2>{featImport.title}</h2>
-      <p>{featImport.body}</p>
-    </div>
-    <div class="feature-shot">
-      <Shot width={430}>
-        <ShotImport />
-      </Shot>
-    </div>
-  </div>
+  {
+    copy.features.map((feature, index) => (
+      <div class="feature">
+        <div class="feature-text">
+          <p class="kicker">{feature.kicker}</p>
+          <h2>{feature.title}</h2>
+          <p>{feature.body}</p>
+        </div>
+        <div class="feature-shot">
+          <img
+            class="shot-img"
+            src={assetPath(shots[index].src)}
+            alt={`linko — ${feature.kicker}`}
+            width={shots[index].width}
+            height={shots[index].height}
+            loading="lazy"
+          />
+        </div>
+      </div>
+    ))
+  }
 </section>
 
 <section class="download" id="download">

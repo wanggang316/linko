@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
  * Resolve those files at build time so the site can never drift from them.
  */
 function locate(name: string): string {
+  // src/lib/ -> apps/website/ is two levels up, the repo root two more.
   const candidates = [
-    fileURLToPath(new URL(`../../../${name}`, import.meta.url)),
-    resolve(process.cwd(), '..', name),
+    fileURLToPath(new URL(`../../../../${name}`, import.meta.url)),
+    resolve(process.cwd(), '..', '..', name),
     resolve(process.cwd(), name),
   ];
   const found = candidates.find((p) => existsSync(p));
