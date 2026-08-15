@@ -70,7 +70,10 @@ const home = localePath(lang);
   <body>
     <header class="top">
       <div class="container top-inner">
-        <a class="brand" href={home}>linko</a>
+        <a class="brand" href={home}>
+          <img src={assetPath('logo.png')} alt="" width="26" height="26" />
+          <span>linko</span>
+        </a>
         <a href={`${home}#features`}>{copy.nav.features}</a>
         <a href={`${home}#download`}>{copy.nav.download}</a>
         <a
@@ -92,6 +95,10 @@ const home = localePath(lang);
 
     <footer>
       <div class="container">
+        <p class="foot-brand">
+          <img src={assetPath('logo.png')} alt="" width="22" height="22" />
+          <span>linko</span>
+        </p>
         <nav class="links">
           {
             footerLinks(lang).map((link) => (

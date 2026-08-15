@@ -23,7 +23,6 @@ export function localePath(lang: Lang, route: Route = ''): string {
 export const assetPath = (file: string): string => `${BASE}/${file.replace(/^\//, '')}`;
 
 interface Feature {
-  kicker: string;
   title: string;
   body: string;
 }
@@ -47,7 +46,6 @@ interface Copy {
     cta: string;
     allReleases: string;
     brewLabel: string;
-    notes: string[];
   };
   footer: { line: string; docs: string };
   changelog: {
@@ -81,42 +79,36 @@ const zh: Copy = {
   },
   features: [
     {
-      kicker: '一键开启',
-      title: '点一下，就开好了',
-      body: '从菜单栏一键开关。普通模式接管浏览器等常见应用；全局模式连命令行和不走系统设置的应用也一并接管。重启电脑自动恢复上次的状态，不用每次重新设置。',
+      title: '两种接管模式',
+      body: '系统代理接管浏览器等常规应用；TUN 全局接管整机流量，包括命令行。一处切换，重启后恢复上次状态。',
     },
     {
-      kicker: '智能分流',
-      title: '该走的走，该拦的拦',
-      body: '用规则决定每个网站、每个应用怎么走：国外服务走代理，国内网站直连，广告域名直接拦截。改动立即生效；正在浏览的网站还能一键加规则，不用打开主界面。',
+      title: '规则分流',
+      body: '按域名、IP、进程、端口匹配，走代理、直连或拦截。改动立即生效，支持导入 Surge 与 Clash 规则。',
     },
     {
-      kicker: '流量观测',
-      title: '谁在联网，一目了然',
-      body: '哪个应用连去了哪里、命中了哪条规则、用了多少流量，实时看到。节点一键测速，慢了随时换。',
+      title: '订阅导入',
+      body: '粘贴订阅链接或节点分享链接，自动识别格式；也可以手动添加节点。多套配置文件独立保存、随时切换。',
     },
     {
-      kicker: '订阅与配置',
-      title: '订阅一贴就能用',
-      body: '粘贴订阅链接或节点分享链接，自动识别格式，节点立刻可用；也可以手动添加。多套配置随意切换，回到家、到公司，还能按所在网络自动换配置。',
+      title: '流量与连接',
+      body: '每条连接的进程、目标、命中规则和流量实时可见，可搜索、可关闭。节点延迟一键测试。',
     },
     {
-      kicker: '日志',
-      title: '出了问题，查得到',
-      body: '完整的运行日志随时查看、过滤、导出。每条连接走了哪个节点、命中了哪条规则，都有迹可循。',
+      title: '按网络切换',
+      body: '按所在子网或网络接口自动切换配置文件，回家、到公司各用各的，无需定位权限。',
+    },
+    {
+      title: '运行日志',
+      body: '完整日志随时查看、过滤、导出，每条连接的去向都有记录。',
     },
   ],
   download: {
-    title: '免费下载，开源可信',
+    title: '免费下载',
     lede: 'linko 完全免费、代码公开，不内置任何付费节点或推广。装好后应用会自动保持最新。',
     cta: '下载 macOS 版',
     allReleases: '全部版本',
     brewLabel: '也可以用 Homebrew 安装：',
-    notes: [
-      '需要 macOS 14 及以上，Apple 芯片与 Intel 都支持。',
-      '全局模式首次使用时，需在系统设置中批准一次扩展。',
-      '需要自备订阅或节点，linko 不提供任何节点。',
-    ],
   },
   footer: {
     line: 'linko 是自由软件（GPL-3.0 开源），基于开源内核 sing-box 构建。',
@@ -160,43 +152,36 @@ const en: Copy = {
   },
   features: [
     {
-      kicker: 'One click',
-      title: 'Flip a switch, and you are through',
-      body: 'Turn the proxy on and off right from the menu bar. Standard mode covers browsers and most apps; global mode also catches terminals and apps that ignore system settings. After a reboot, linko restores itself — no re-setup.',
+      title: 'Two interception modes',
+      body: 'System proxy covers browsers and most apps; TUN takes the whole machine, terminals included. One switch, and the state survives restarts.',
     },
     {
-      kicker: 'Smart routing',
-      title: 'The right traffic takes the right path',
-      body: 'Rules decide how each site and app connects: foreign services through the proxy, local sites directly, ad domains blocked. Changes apply instantly — and you can add a rule for the site you are on with one click.',
+      title: 'Rule-based routing',
+      body: 'Match by domain, IP, process or port; proxy, connect directly or block. Changes apply live, and Surge / Clash rules import cleanly.',
     },
     {
-      kicker: 'Live traffic',
-      title: 'See exactly who is online',
-      body: 'Which app is connecting where, which rule it matched, how much data it used — all live. Test node speed with one click and switch whenever one slows down.',
+      title: 'Subscription import',
+      body: 'Paste a subscription or share link — the format is detected. Manual nodes work too, and profiles are kept separately and switch freely.',
     },
     {
-      kicker: 'Subscriptions & profiles',
-      title: 'Your subscription just works',
-      body: 'Paste a subscription or share link and the format is recognized — nodes are ready at once, or add them by hand. Keep several profiles and switch freely; linko can even switch by the network you are on.',
+      title: 'Traffic & connections',
+      body: 'Process, destination, matched rule and throughput for every connection, searchable and closable. One-click latency tests.',
     },
     {
-      kicker: 'Logs',
-      title: "When something's off, you can see why",
-      body: 'Full runtime logs to browse, filter and export — every connection, the node it took and the rule that sent it there.',
+      title: 'Per-network profiles',
+      body: 'Profiles switch automatically by subnet or interface as you move between networks. No location permission involved.',
+    },
+    {
+      title: 'Runtime logs',
+      body: 'View, filter and export the full log — every connection leaves a trace.',
     },
   ],
   download: {
-    title: 'Free, and open to inspection',
+    title: 'Download',
     lede: 'linko is completely free with its source in the open — no bundled paid nodes, no promotions. Once installed it keeps itself up to date.',
     cta: 'Download for macOS',
     allReleases: 'All releases',
     brewLabel: 'Or install with Homebrew:',
-    notes: [
-      'Requires macOS 14 or later, on Apple silicon and Intel.',
-      'Global mode asks you to approve an extension in System Settings, once.',
-      'Bring your own subscription or nodes — linko provides none.',
-      'The app interface currently ships in Chinese.',
-    ],
   },
   footer: {
     line: 'linko is free software (GPL-3.0), built on the open-source sing-box core.',

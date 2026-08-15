@@ -1,5 +1,7 @@
-/* linko.site — clean product landing.
-   System sans, light-first, one blue accent; dark follows the OS. */
+/* linko.site — macOS-flavoured, a little geeky.
+   System sans for prose, mono for the technical furniture (labels, versions,
+   the terminal). Light is soft gray on white; dark is a tinted graphite, not
+   pure black. One blue accent, with the icon's yellow/green as tiny signals. */
 
 :root {
   color-scheme: light dark;
@@ -9,9 +11,15 @@
   --text: #1d1d1f;
   --muted: #6e6e73;
   --faint: #a1a1a6;
-  --line: #e8e8ed;
+  --line: #e6e6eb;
   --accent: #0071e3;
   --accent-hover: #0077ed;
+  --dot-grid: rgb(29 29 31 / 0.08);
+  --glow: radial-gradient(52% 64% at 72% 36%, rgb(0 113 227 / 0.1), transparent 70%);
+
+  --term-bg: #101418;
+  --term-text: #d6dde6;
+  --term-prompt: #79e128;
 
   --radius: 14px;
   --radius-lg: 22px;
@@ -23,14 +31,18 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --bg-alt: #101013;
-    --text: #f5f5f7;
-    --muted: #a1a1a6;
-    --faint: #6e6e73;
-    --line: #26262b;
-    --accent: #2997ff;
-    --accent-hover: #4ba5ff;
+    --bg: #121419;
+    --bg-alt: #181b21;
+    --text: #f2f4f8;
+    --muted: #9aa3b2;
+    --faint: #646d7c;
+    --line: #262b34;
+    --accent: #3b9eff;
+    --accent-hover: #5cadff;
+    --dot-grid: rgb(242 244 248 / 0.07);
+    --glow: radial-gradient(52% 64% at 72% 36%, rgb(59 158 255 / 0.13), transparent 70%);
+
+    --term-bg: #0c0f13;
   }
 }
 
@@ -89,6 +101,16 @@ h3 {
   text-wrap: balance;
 }
 
+/* Sized for the 5-of-12 hero column next to the screenshot. */
+h1 {
+  font-size: clamp(2.3rem, 1.6rem + 2.6vw, 3.4rem);
+  letter-spacing: -0.028em;
+}
+
+h2 {
+  font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.6rem);
+}
+
 /* `balance` breaks CJK headlines mid-word; natural filling reads better.
    CJK glyphs also run wider than Latin, so the display size steps down. */
 :lang(zh-Hans) h2,
@@ -97,20 +119,7 @@ h3 {
 }
 
 :lang(zh-Hans) h1 {
-  font-size: clamp(2.3rem, 1.5rem + 3vw, 3.6rem);
-}
-
-h1 {
-  font-size: clamp(2.5rem, 1.7rem + 3.6vw, 4.25rem);
-  letter-spacing: -0.028em;
-}
-
-h2 {
-  font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.6rem);
-}
-
-h3 {
-  font-size: 1.375rem;
+  font-size: clamp(2.1rem, 1.4rem + 2.4vw, 3rem);
 }
 
 p {
@@ -149,10 +158,17 @@ p {
 }
 
 .top .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   color: var(--text);
   font-weight: 700;
   font-size: 1.05rem;
   margin-right: auto;
+}
+
+.top .brand img {
+  border-radius: 6px;
 }
 
 .top a:not(.brand) {
@@ -204,19 +220,41 @@ p {
 /* --- hero ------------------------------------------------------------------- */
 
 .hero {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   align-items: center;
-  gap: clamp(32px, 6vw, 80px);
-  padding-block: clamp(48px, 8vw, 100px) clamp(48px, 7vw, 88px);
+  gap: clamp(32px, 5vw, 64px);
+  padding-block: clamp(48px, 8vw, 96px) clamp(48px, 7vw, 88px);
+}
+
+/* dot grid + accent glow, fading out toward the content below */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0 -100vw 0 -100vw;
+  z-index: -1;
+  background-image: radial-gradient(var(--dot-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: -10% -20%;
+  z-index: -1;
+  background: var(--glow);
+  pointer-events: none;
 }
 
 .hero .lede {
   margin-top: 22px;
   max-width: 30em;
   color: var(--muted);
-  font-size: clamp(1.1rem, 1rem + 0.5vw, 1.3rem);
-  line-height: 1.55;
+  font-size: clamp(1.05rem, 1rem + 0.4vw, 1.25rem);
+  line-height: 1.6;
 }
 
 .hero .cta {
@@ -228,9 +266,11 @@ p {
 }
 
 .hero .fine {
-  margin-top: 18px;
+  margin-top: 20px;
   color: var(--faint);
-  font-size: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
 }
 
 .hero-shot {
@@ -239,16 +279,12 @@ p {
   min-width: 0;
 }
 
-/* Real app screenshots. They carry their own rounded window corners in the
-   alpha channel, so the shadow follows the shape via drop-shadow. */
+/* Real app screenshots: rounded window corners live in the alpha channel,
+   so the shadow follows the shape via drop-shadow. */
 .shot-img {
   width: 100%;
   height: auto;
-  filter: drop-shadow(0 24px 48px rgb(0 0 0 / 0.24));
-}
-
-.hero-img {
-  max-width: 340px;
+  filter: drop-shadow(0 24px 48px rgb(16 20 26 / 0.28));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -257,51 +293,41 @@ p {
   }
 }
 
-/* --- feature rows ------------------------------------------------------------ */
+/* --- features --------------------------------------------------------------- */
 
 .features {
-  padding-block: clamp(24px, 4vw, 48px);
+  padding-block: clamp(28px, 5vw, 64px) clamp(56px, 8vw, 96px);
 }
 
-.feature {
+.feature-grid {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  align-items: center;
-  gap: clamp(28px, 5vw, 72px);
-  padding-block: clamp(40px, 6vw, 80px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(28px, 4vw, 48px) clamp(28px, 4vw, 56px);
 }
 
-/* Even rows put the shot on the left — swap the column widths with it, so
-   the image always gets the wide track. */
-.feature:nth-child(even) {
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-}
-
-.feature:nth-child(even) .feature-text {
-  order: 2;
-}
-
-.feature + .feature {
+.feature-item {
   border-top: 1px solid var(--line);
+  padding-top: 18px;
 }
 
-.feature-text .kicker {
+.feature-index {
+  display: block;
+  margin-bottom: 12px;
   color: var(--accent);
-  font-weight: 600;
-  font-size: 0.95rem;
-  margin-bottom: 10px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
 }
 
-.feature-text p {
-  margin-top: 14px;
+.feature-item h2 {
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+.feature-item p {
+  margin-top: 8px;
   color: var(--muted);
-  font-size: 1.05rem;
-}
-
-.feature-shot {
-  display: flex;
-  justify-content: center;
-  min-width: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
 }
 
 /* --- download ---------------------------------------------------------------- */
@@ -331,34 +357,45 @@ p {
 
 .brew {
   display: inline-block;
-  margin-top: 26px;
-  padding: 10px 18px;
+  margin-top: 12px;
+  padding: 11px 18px;
   border-radius: 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  color: var(--muted);
+  background: var(--term-bg);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  color: var(--term-text);
   font-family: var(--mono);
   font-size: 0.85rem;
   overflow-x: auto;
   max-width: 100%;
   white-space: nowrap;
+  text-align: left;
 }
 
-.download .notes {
-  margin: 26px auto 0;
-  max-width: 36em;
-  color: var(--faint);
-  font-size: 0.85rem;
-  line-height: 1.8;
+.brew .prompt {
+  color: var(--term-prompt);
+  user-select: none;
 }
 
 /* --- footer ------------------------------------------------------------------ */
 
 footer {
   border-top: 1px solid var(--line);
-  padding-block: 28px 40px;
+  padding-block: 30px 42px;
   color: var(--faint);
   font-size: 0.85rem;
+}
+
+.foot-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.foot-brand img {
+  border-radius: 5px;
 }
 
 footer .links {
@@ -394,18 +431,21 @@ footer a {
 
 .release-meta h2 {
   font-size: 1.3rem;
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
 }
 
 .release-meta time {
   display: block;
-  margin-top: 4px;
+  margin-top: 6px;
   color: var(--faint);
-  font-size: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
 }
 
 .release-meta .latest {
   display: inline-block;
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 2px 10px;
   border-radius: 980px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -428,9 +468,10 @@ footer a {
 }
 
 .group h3 {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 650;
-  letter-spacing: 0.05em;
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--faint);
   margin-bottom: 10px;
@@ -471,17 +512,15 @@ footer a {
 
 /* --- responsive --------------------------------------------------------------- */
 
+@media (max-width: 900px) {
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 820px) {
   .hero {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .feature {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .feature:nth-child(even) .feature-text {
-    order: 0;
   }
 
   .release {
@@ -492,6 +531,12 @@ footer a {
   .top-inner {
     gap: 16px;
     font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .feature-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
