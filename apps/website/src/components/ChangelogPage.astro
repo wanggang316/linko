@@ -1,0 +1,54 @@
+---
+import { getReleases } from '../lib/changelog';
+import { t, type Lang } from '../lib/i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const copy = t(lang);
+const releases = getReleases(lang);
+
+const anchor = (version: string) => `v${version.toLowerCase().replace(/[^a-z0-9.]+/g, '-')}`;
+const sectionLabel = (title: string) => copy.changelog.sections[title] ?? title;
+const latest = releases.find((release) => !release.unreleased)?.version;
+---
+
+<div class="container">
+  <header class="page-head">
+    <h1>{copy.changelog.title}</h1>
+    <p>{copy.changelog.lede}</p>
+  </header>
+
+  {
+    releases.map((release) => (
+      <article class="release" id={anchor(release.version)}>
+        <div class="release-meta">
+          <h2>{release.unreleased ? copy.changelog.unreleased : `v${release.version}`}</h2>
+          {release.date && <time datetime={release.date}>{release.date}</time>}
+          {release.version === latest && <span class="latest">{copy.changelog.latest}</span>}
+        </div>
+
+        <div class="release-body">
+          {release.note && <p class="note" set:html={release.note} />}
+
+          {lang === 'zh' && !release.translated && copy.changelog.untranslated && (
+            <p class="note">{copy.changelog.untranslated}</p>
+          )}
+
+          {release.sections.map((section) => (
+            <section class="group">
+              <h3>{sectionLabel(section.title)}</h3>
+              <ul class="entries">
+                {section.entries.map((entry) => (
+                  <li set:html={entry} />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </article>
+    ))
+  }
+</div>

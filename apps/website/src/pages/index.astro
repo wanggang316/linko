@@ -1,0 +1,12 @@
+---
+import HomePage from '../components/HomePage.astro';
+import Base from '../layouts/Base.astro';
+import { t, type Lang } from '../lib/i18n';
+
+const lang: Lang = 'zh';
+const copy = t(lang);
+---
+
+<Base lang={lang} route="" title={copy.home.title} description={copy.home.description}>
+  <HomePage lang={lang} />
+</Base>

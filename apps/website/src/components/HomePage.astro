@@ -1,0 +1,84 @@
+---
+import { APP_VERSION, BREW_TAP_COMMAND, LATEST_RELEASE_URL, GITHUB_URL } from '../lib/site';
+import { assetPath, t, type Lang } from '../lib/i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const copy = t(lang);
+const [ledeTitle, ...rest] = copy.hero.title.split('\n');
+---
+
+<section class="hero container">
+  <div class="hero-copy">
+    <h1>{ledeTitle}<br />{rest.join(' ')}</h1>
+    <p class="lede">{copy.hero.lede}</p>
+    <div class="cta">
+      <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
+        {copy.hero.download}
+      </a>
+      <a class="btn btn-quiet" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+        {copy.hero.github} ›
+      </a>
+    </div>
+    <p class="fine">{copy.hero.fine(APP_VERSION)}</p>
+  </div>
+
+  <div class="hero-shot">
+    <img
+      class="shot-img"
+      src={assetPath('screenshots/2.png')}
+      alt={copy.hero.shotTitle}
+      width="957"
+      height="693"
+      fetchpriority="high"
+    />
+  </div>
+</section>
+
+<section class="features container" id="features">
+  <ul class="feature-grid">
+    {
+      copy.features.map((feature, index) => (
+        <li class="feature-item">
+          <span class="feature-index">{String(index + 1).padStart(2, '0')}</span>
+          <h2>{feature.title}</h2>
+          <p>{feature.body}</p>
+        </li>
+      ))
+    }
+  </ul>
+</section>
+
+<section class="download" id="download">
+  <div class="container">
+    <h2>{copy.download.title}</h2>
+    <p class="lede">{copy.download.lede}</p>
+    <div class="cta">
+      <a class="btn btn-primary" href={LATEST_RELEASE_URL} target="_blank" rel="noopener noreferrer">
+        {copy.download.cta}
+      </a>
+      <a
+        class="btn btn-quiet"
+        href={`${GITHUB_URL}/releases`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {copy.download.allReleases} ›
+      </a>
+    </div>
+    <div>
+      <p class="fine-label muted">{copy.download.brewLabel}</p>
+      <code class="brew"><span class="prompt">$</span> {BREW_TAP_COMMAND}</code>
+    </div>
+  </div>
+</section>
+
+<style>
+  .fine-label {
+    margin-top: 34px;
+    font-size: 0.85rem;
+  }
+</style>

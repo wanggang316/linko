@@ -5,6 +5,7 @@ linko is an open-source macOS menu bar proxy client built with SwiftUI, using
 Clash YAML subscription import, node selection with latency testing, and
 one-click macOS system proxy toggling.
 
+- Website: <https://wanggang316.github.io/linko/> (built from `apps/website/`)
 - macOS 14.0+, Apple Silicon & Intel
 - Menu bar only (no Dock icon)
 - Milestone 1 runs sing-box as a subprocess; TUN/NetworkExtension mode is
@@ -63,6 +64,8 @@ apps/LinkoApp/        SwiftUI menu bar app
 packages/LinkoKit/    Swift package: models, subscription parsing, config
                       generation, core lifecycle, system proxy, Clash API
 scripts/              fetch-singbox.sh (core binary), linko (URL-scheme CLI)
+apps/website/         Astro marketing site (landing + changelog), published to
+                      GitHub Pages; reads project.yml and CHANGELOG.md at build
 docs/                 PRODUCT.md / ARCHITECTURE.md / ROADMAP.md
 ```
 

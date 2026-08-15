@@ -2,7 +2,8 @@ PROJECT := Linko.xcodeproj
 SCHEME := LinkoApp
 CONFIG := Debug
 
-.PHONY: gen build test test-app fetch-core run clean archive release dmg bump-version
+.PHONY: gen build test test-app fetch-core run clean archive release dmg bump-version \
+        site site-dev site-preview
 
 gen:
 	xcodegen generate
@@ -46,6 +47,18 @@ bump-version:
 	fi
 	./scripts/bump-version.sh $(VERSION) $(BUILD)
 
+# --- Marketing site (apps/website/; see apps/website/README.md) -----------
+# The site reads MARKETING_VERSION from project.yml and the release notes from
+# CHANGELOG.md at build time, so it never needs its own copy of either.
+site:
+	cd apps/website && npm ci && npm run check && npm run build
+
+site-dev:
+	cd apps/website && npm install && npm run dev
+
+site-preview:
+	cd apps/website && npm run preview
+
 clean:
-	rm -rf $(PROJECT) DerivedData
+	rm -rf $(PROJECT) DerivedData apps/website/dist
 	cd packages/LinkoKit && swift package clean
