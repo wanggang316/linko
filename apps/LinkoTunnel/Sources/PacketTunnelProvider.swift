@@ -161,14 +161,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let newConfig = String(data: messageData, encoding: .utf8), !newConfig.isEmpty else {
             return Data("invalid config message".utf8)
         }
+        tunnelLog.error("handleAppMessage: reload begin")
         do {
             try persistConfig(newConfig)
             self.currentConfig = newConfig
             reasserting = true
             defer { reasserting = false }
             try commandServer?.startOrReloadService(newConfig, options: LibboxOverrideOptions())
+            tunnelLog.error("handleAppMessage: reload done")
             return nil
         } catch {
+            tunnelLog.error("handleAppMessage: reload FAILED: \(error.localizedDescription, privacy: .public)")
             return Data("reload failed: \(error.localizedDescription)".utf8)
         }
     }

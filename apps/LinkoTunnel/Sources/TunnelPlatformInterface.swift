@@ -22,8 +22,17 @@ final class TunnelPlatformInterface: NSObject {
 
     /// The default-interface monitor libbox asks us to run; started in
     /// `startDefaultInterfaceMonitor` and cancelled in `closeDefaultInterfaceMonitor`.
+    /// libbox calls into this object from many goroutine threads, so every
+    /// access to `interfaceMonitor` and `physicalIndex` holds `stateLock`.
     private var interfaceMonitor: NWPathMonitor?
     private let monitorQueue = DispatchQueue(label: "com.gumpw.linko.tunnel.interface-monitor")
+    private let stateLock = NSLock()
+    /// Index of the last physical egress interface the monitor reported. Kept
+    /// across monitor restarts (each reload restarts it) so sockets opened in
+    /// that window still bind to a physical interface.
+    private var physicalIndex: UInt32?
+    /// Set while sockets cannot be bound, so the failure is logged once.
+    private var bindFailureLogged = false
 
     init(provider: PacketTunnelProvider) {
         self.provider = provider
@@ -31,8 +40,7 @@ final class TunnelPlatformInterface: NSObject {
 
     /// Tears down monitors and clears cached settings on stop.
     func reset() {
-        interfaceMonitor?.cancel()
-        interfaceMonitor = nil
+        replaceInterfaceMonitor(with: nil)
         networkSettings = nil
     }
 }
@@ -235,24 +243,63 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
         // is recaptured by auto_route back into the tunnel and loops endlessly
         // (dozens of [proxy] sessions to the node's own ip:port), starving real
         // traffic. NE does NOT auto-protect these on macOS — we IP_BOUND_IF them.
-        guard let index = physicalInterfaceIndex() else { return }
+        // An unbound socket would loop, so fail the dial instead: sing-box
+        // then reports a clear error rather than stalling the connection.
+        guard let index = physicalInterfaceIndex() else {
+            logBindFailure("no physical interface")
+            throw tunnelError("no physical interface to bind outbound socket")
+        }
         var idx = index
         let size = socklen_t(MemoryLayout<UInt32>.size)
-        _ = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &idx, size)
-        _ = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, size)
+        // A socket has one address family, so at most one of these applies.
+        let v4 = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &idx, size)
+        let v4Errno = errno
+        let v6 = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, size)
+        let v6Errno = errno
+        guard v4 == 0 || v6 == 0 else {
+            let reason = "v4 \(String(cString: strerror(v4Errno))), v6 \(String(cString: strerror(v6Errno)))"
+            logBindFailure("bind to index \(index) failed: \(reason)")
+            throw tunnelError("bind outbound socket to interface \(index): \(reason)")
+        }
+        stateLock.withLock { bindFailureLogged = false }
     }
 
     func usePlatformAutoDetectControl() -> Bool { true }
 
     /// Index of the default physical egress interface (e.g. en0). Outbound
-    /// sockets are bound to it so they bypass the tunnel utun.
+    /// sockets are bound to it so they bypass the tunnel utun. Never returns a
+    /// tunnel interface; falls back to the last known physical interface.
     private func physicalInterfaceIndex() -> UInt32? {
-        guard let path = interfaceMonitor?.currentPath else { return nil }
-        let physical = path.availableInterfaces.first {
-            !$0.name.hasPrefix("utun") && !$0.name.hasPrefix("lo") && !$0.name.hasPrefix("ipsec")
+        stateLock.withLock {
+            if let iface = interfaceMonitor?.currentPath.physicalInterface {
+                physicalIndex = UInt32(iface.index)
+            }
+            return physicalIndex
         }
-        guard let iface = physical ?? path.availableInterfaces.first else { return nil }
-        return UInt32(iface.index)
+    }
+
+    private func updatePhysicalInterface(_ iface: NWInterface?) {
+        guard let iface else { return }
+        stateLock.withLock { physicalIndex = UInt32(iface.index) }
+    }
+
+    private func logBindFailure(_ message: String) {
+        let shouldLog = stateLock.withLock {
+            defer { bindFailureLogged = true }
+            return !bindFailureLogged
+        }
+        if shouldLog {
+            tunnelLog.error("autoDetectControl: \(message, privacy: .public)")
+        }
+    }
+
+    /// Swaps the monitor under the lock and cancels the old one outside it.
+    private func replaceInterfaceMonitor(with monitor: NWPathMonitor?) {
+        let old = stateLock.withLock {
+            defer { interfaceMonitor = monitor }
+            return interfaceMonitor
+        }
+        old?.cancel()
     }
 
     func useProcFS() -> Bool { false }
@@ -273,7 +320,7 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
     }
 
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        guard let monitor = interfaceMonitor else {
+        guard let monitor = stateLock.withLock({ interfaceMonitor }) else {
             throw tunnelError("Default interface monitor not started")
         }
         let path = monitor.currentPath
@@ -292,7 +339,7 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
             throw tunnelError("startDefaultInterfaceMonitor called with nil listener")
         }
         let monitor = NWPathMonitor()
-        self.interfaceMonitor = monitor
+        replaceInterfaceMonitor(with: monitor)
 
         // Block until the first path is known so libbox sees a valid default
         // interface immediately after this call returns. The path handler runs
@@ -300,7 +347,11 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
         // smuggles the non-Sendable listener across the boundary (it is only
         // ever touched on the monitor queue).
         let semaphore = DispatchSemaphore(value: 0)
-        let relay = InterfaceUpdateRelay(listener: listener) { semaphore.signal() }
+        let relay = InterfaceUpdateRelay(
+            listener: listener,
+            onPhysicalInterface: { [weak self] in self?.updatePhysicalInterface($0) },
+            onFirstPath: { semaphore.signal() }
+        )
         monitor.pathUpdateHandler = { path in
             relay.deliver(path)
         }
@@ -309,8 +360,7 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
     }
 
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
-        interfaceMonitor?.cancel()
-        interfaceMonitor = nil
+        replaceInterfaceMonitor(with: nil)
     }
 
     func findConnectionOwner(
