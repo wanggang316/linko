@@ -102,6 +102,10 @@ final class AppState: ObservableObject {
     let tunnelController: any TunnelControlling
     /// Mirrors `tunnelController.status` into `tunnelStatus`.
     private var tunnelStatusObservation: AnyCancellable?
+    /// The config most recently delivered to the running tunnel (start or
+    /// successful reload). Lets a reconfigure that rebuilds identical JSON
+    /// skip the hot reload, which would reset every live connection.
+    private var appliedTunConfig: Data?
 
     // MARK: - Lifecycle serialization
 
@@ -528,6 +532,9 @@ final class AppState: ObservableObject {
                     lastErrorMessage = "生成 TUN 配置失败，隧道仍在运行旧配置：\(error.localizedDescription)"
                     return
                 }
+                // The builder emits sorted keys, so equal data means an equal
+                // config. A scheduled subscription refresh usually lands here.
+                guard configData != appliedTunConfig else { return }
                 // PRE-FLIGHT VALIDATION (mirrors startTunnel): a config that
                 // fails `sing-box check` must never reach the running tunnel.
                 // Without this, a bad routing edit would ride reload →
@@ -560,6 +567,7 @@ final class AppState: ObservableObject {
                 }
                 do {
                     try await tunnelController.reload(configJSON: configJSON)
+                    appliedTunConfig = configData
                     // The running config is fresh again: clear any stale
                     // reload complaint (e.g. a pre-flight rejection the user
                     // just fixed), mirroring the restart path's entry clear.
@@ -621,6 +629,7 @@ final class AppState: ObservableObject {
             // and starts the tunnel. The extension runs sing-box via libbox and
             // calls back to configure the utun interface.
             try await tunnelController.start(configJSON: configJSON)
+            appliedTunConfig = configData
             // The Clash API is served from inside the extension on
             // 127.0.0.1:<clashAPIPort>; reflect "running" so the dashboard and
             // node selection use it. Actual readiness is confirmed when the
@@ -642,6 +651,7 @@ final class AppState: ObservableObject {
     /// mode-switching, and shutdown.
     private func stopTunnelInternal() async {
         tunnelController.stop()
+        appliedTunConfig = nil
         coreState = .stopped
         nodeDelays = [:]
     }
@@ -656,6 +666,7 @@ final class AppState: ObservableObject {
         case .connected:
             coreState = .running(pid: 0)
         case .disconnected, .invalid:
+            appliedTunConfig = nil
             // Don't clobber a `.failed` reason we set ourselves on a start error.
             if case .failed = coreState { return }
             coreState = .stopped

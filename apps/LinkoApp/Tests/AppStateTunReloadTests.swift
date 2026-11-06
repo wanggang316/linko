@@ -149,6 +149,23 @@ final class AppStateTunReloadTests: XCTestCase {
         XCTAssertNil(fixture.state.lastErrorMessage)
     }
 
+    /// A reconfigure that rebuilds the exact config the tunnel already runs
+    /// (e.g. a scheduled subscription refresh with no upstream change) must
+    /// not hot-reload: every reload resets all live connections.
+    func testUnchangedTunConfigSkipsReload() async throws {
+        let fixture = try await makeTunReadyFixture()
+
+        var edited = fixture.node
+        edited.server = "updated.example.com"
+        await fixture.state.updateManualNode(edited)
+        XCTAssertEqual(fixture.tunnel.calls, [.reload])
+
+        await fixture.state.updateManualNode(edited)
+
+        XCTAssertEqual(fixture.tunnel.calls, [.reload])
+        XCTAssertNil(fixture.state.lastErrorMessage)
+    }
+
     // MARK: - Fixture
 
     private struct Fixture {
@@ -291,8 +308,9 @@ private final class TunnelControllerMock: TunnelControlling {
 
 // MARK: - Service mocks
 
-/// Emits JSON carrying the nodes' servers so tests can assert which node set
-/// a config handed to the tunnel was built from. Throws on demand to simulate
+/// Emits JSON carrying the nodes' servers and the routing final target, so
+/// tests can assert which inputs a config handed to the tunnel was built from
+/// and routing edits yield a different config. Throws on demand to simulate
 /// an unrepresentable config.
 private final class ConfigBuilderMock: SingBoxConfigBuilding {
     var buildError: Error?
@@ -302,7 +320,8 @@ private final class ConfigBuilderMock: SingBoxConfigBuilding {
         buildCount += 1
         if let buildError { throw buildError }
         let servers = nodes.map(\.server).joined(separator: ",")
-        return Data(#"{"servers":"\#(servers)"}"#.utf8)
+        let finalTarget = preferences.routing.finalTarget
+        return Data(#"{"final":"\#(finalTarget)","servers":"\#(servers)"}"#.utf8)
     }
 
     func outboundTags(for nodes: [ProxyNode]) -> [String] {
