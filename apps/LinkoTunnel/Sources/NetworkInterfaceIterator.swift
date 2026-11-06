@@ -31,29 +31,58 @@ final class NetworkInterfaceIterator: NSObject, LibboxNetworkInterfaceIteratorPr
 /// touched from that queue.
 final class InterfaceUpdateRelay: @unchecked Sendable {
     private let listener: LibboxInterfaceUpdateListenerProtocol
+    private let onPhysicalInterface: (NWInterface?) -> Void
     private let onFirstPath: () -> Void
     private let lock = NSLock()
     private var firstPathDelivered = false
+    private var lastReported: String?
 
-    init(listener: LibboxInterfaceUpdateListenerProtocol, onFirstPath: @escaping () -> Void) {
+    init(
+        listener: LibboxInterfaceUpdateListenerProtocol,
+        onPhysicalInterface: @escaping (NWInterface?) -> Void,
+        onFirstPath: @escaping () -> Void
+    ) {
         self.listener = listener
+        self.onPhysicalInterface = onPhysicalInterface
         self.onFirstPath = onFirstPath
     }
 
     func deliver(_ path: NWPath) {
-        let defaultInterface = path.availableInterfaces.first
+        // Report only a physical interface: the extension's own utun can be
+        // listed in the path. Index -1 tells libbox the network is gone, so it
+        // drops the stale default interface and resets connections on return.
+        let physical = path.status == .unsatisfied ? nil : path.physicalInterface
+        onPhysicalInterface(physical)
         listener.updateDefaultInterface(
-            defaultInterface?.name ?? "",
-            interfaceIndex: Int32(defaultInterface?.index ?? 0),
+            physical?.name ?? "",
+            interfaceIndex: physical.map { Int32($0.index) } ?? -1,
             isExpensive: path.isExpensive,
             isConstrained: path.isConstrained
         )
+        let report = "\(path.status) \(physical.map { "\($0.name)#\($0.index)" } ?? "none")"
         lock.lock()
         let shouldSignal = !firstPathDelivered
         firstPathDelivered = true
+        let changed = report != lastReported
+        lastReported = report
         lock.unlock()
+        if changed {
+            tunnelLog.error("default interface: \(report, privacy: .public)")
+        }
         if shouldSignal {
             onFirstPath()
+        }
+    }
+}
+
+extension NWPath {
+    /// The first available interface that leaves the host directly: never a
+    /// tunnel (utun, ipsec) or loopback, which would loop traffic back into
+    /// the tunnel.
+    var physicalInterface: NWInterface? {
+        availableInterfaces.first { iface in
+            iface.type != .loopback && !iface.name.hasPrefix("lo")
+                && !iface.name.hasPrefix("utun") && !iface.name.hasPrefix("ipsec")
         }
     }
 }
