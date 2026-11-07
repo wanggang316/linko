@@ -137,9 +137,8 @@ struct DNSBuilder {
         if let detour = server.detour, !detour.isEmpty, !BuiltinReject.matches(detour) {
             object["detour"] = detour
         }
-        if let strategy = server.strategy {
-            object["strategy"] = strategy.rawValue
-        }
+        // `server.strategy` is not emitted: typed servers (sing-box 1.12+)
+        // reject a `strategy` field. validate() warns when one is set.
 
         // A hostname-based server (not an IP, not `local`/`fakeip`) needs a
         // resolver to look up its own address; point it at the bootstrap unless

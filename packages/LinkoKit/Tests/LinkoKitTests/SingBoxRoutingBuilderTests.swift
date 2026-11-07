@@ -737,6 +737,27 @@ final class SingBoxRoutingBuilderTests: XCTestCase {
         XCTAssertEqual(rules[0]["domain_keyword"] as? [String], ["ads"])
     }
 
+    /// sing-box 1.12+ typed DNS servers have no `strategy` field; emitting it
+    /// makes `sing-box check` fail with `unknown field "strategy"`. A legacy
+    /// per-server strategy is dropped and called out by validate().
+    func testPerServerDNSStrategyIsDroppedWithWarning() throws {
+        let routing = RoutingConfig(
+            dns: DNSConfig(
+                isEnabled: true,
+                servers: [DNSServer(tag: "dns-proxy", address: "tls://1.1.1.1", strategy: .ipv4Only)],
+                finalServerTag: "dns-proxy"
+            )
+        )
+        let config = try buildJSON(nodes: [ssNode("A")], routing: routing)
+        let dns = try XCTUnwrap(config["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        let server = try XCTUnwrap(servers.first { $0["tag"] as? String == "dns-proxy" })
+        XCTAssertNil(server["strategy"])
+
+        let warnings = try builder.validate(nodes: [ssNode("A")], routing: routing)
+        XCTAssertTrue(warnings.contains { $0.contains("dns-proxy") && $0.contains("strategy") }, "\(warnings)")
+    }
+
     func testRejectFinalFallsBackToProxyWithWarning() throws {
         let routing = RoutingConfig(finalTarget: "REJECT")
         let config = try buildJSON(nodes: [ssNode("A")], routing: routing)

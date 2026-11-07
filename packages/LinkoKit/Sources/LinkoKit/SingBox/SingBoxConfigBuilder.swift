@@ -124,6 +124,9 @@ public struct SingBoxConfigBuilder: SingBoxConfigBuilding {
                 if let detour = server.detour, BuiltinReject.matches(detour) {
                     warnings.append("DNS 服务器 “\(server.tag)” 的 detour 不能使用内置拒绝目标 “\(detour)”，将被忽略。")
                 }
+                if server.strategy != nil {
+                    warnings.append("DNS 服务器 “\(server.tag)” 的 strategy 不受 sing-box 支持，将被忽略；请使用全局解析策略。")
+                }
             }
             for rule in routing.dns.rules where rule.isEnabled {
                 if !serverTags.contains(rule.server) {
