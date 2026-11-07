@@ -1,7 +1,6 @@
 import Foundation
 
-/// Domain resolution strategy, mapped to `dns.strategy` (and reused for
-/// per-server strategy).
+/// Domain resolution strategy, mapped to `dns.strategy`.
 ///
 /// See https://sing-box.sagernet.org/configuration/dns/
 public enum DNSStrategy: String, Codable, CaseIterable, Hashable, Sendable {
@@ -31,7 +30,8 @@ public struct DNSServer: Codable, Hashable, Identifiable, Sendable {
     /// `dns.servers[].address_resolver` — tag of another server used to resolve
     /// this server's hostname. `nil` ⇒ field omitted.
     public var addressResolver: String?
-    /// `dns.servers[].strategy` — per-server resolution strategy. `nil` ⇒ omitted.
+    /// Legacy per-server resolution strategy, kept so imported configs decode.
+    /// Never emitted: sing-box 1.12+ typed servers have no `strategy` field.
     public var strategy: DNSStrategy?
 
     public init(
