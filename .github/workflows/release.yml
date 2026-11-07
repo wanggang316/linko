@@ -72,7 +72,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/libbox
-          key: libbox-${{ hashFiles('scripts/build-libbox.sh') }}
+          key: libbox-${{ hashFiles('scripts/build-libbox.sh', 'scripts/sing-box-version') }}
 
       - name: Build Libbox.xcframework
         if: steps.libbox-cache.outputs.cache-hit != 'true'

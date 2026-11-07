@@ -52,14 +52,15 @@ final class InterfaceUpdateRelay: @unchecked Sendable {
         // listed in the path. Index -1 tells libbox the network is gone, so it
         // drops the stale default interface and resets connections on return.
         let physical = path.status == .unsatisfied ? nil : path.physicalInterface
+        let report = "\(path.status) \(physical.map { "\($0.name)#\($0.index)" } ?? "none")"
         onPhysicalInterface(physical)
+        listener.updateNetworkPath(report)
         listener.updateDefaultInterface(
             physical?.name ?? "",
             interfaceIndex: physical.map { Int32($0.index) } ?? -1,
             isExpensive: path.isExpensive,
             isConstrained: path.isConstrained
         )
-        let report = "\(path.status) \(physical.map { "\($0.name)#\($0.index)" } ?? "none")"
         lock.lock()
         let shouldSignal = !firstPathDelivered
         firstPathDelivered = true
