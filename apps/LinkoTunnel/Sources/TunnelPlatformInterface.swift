@@ -66,13 +66,12 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
         if options.getAutoRoute() {
             settings.mtu = NSNumber(value: options.getMTU())
 
-            // DNS — OUR libbox returns a single comma-separated StringBox, not an
-            // iterator. Split it back into individual server addresses.
-            let dnsBox = try options.getDNSServerAddress()
-            let dnsServers = dnsBox.value
-                .split(separator: ",")
-                .map { String($0).trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+            // DNS: the tun inbound's `dns_mode` (default `hijack`) decides
+            // whether the system resolver is pointed at the tunnel.
+            var dnsServers: [String] = []
+            if options.getDNSMode()?.value != LibboxDNSModeDisabled {
+                dnsServers = collectStrings(try options.getDNSServerAddress())
+            }
             let dnsSettings: NEDNSSettings? = dnsServers.isEmpty ? nil : NEDNSSettings(servers: dnsServers)
 
             // IPv4 addresses + routes.
@@ -302,8 +301,6 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
         old?.cancel()
     }
 
-    func useProcFS() -> Bool { false }
-
     func underNetworkExtension() -> Bool { true }
 
     func includeAllNetworks() -> Bool { false }
@@ -382,10 +379,61 @@ extension TunnelPlatformInterface: LibboxPlatformInterfaceProtocol {
 
     func localDNSTransport() -> (any LibboxLocalDNSTransportProtocol)? { nil }
 
-    func systemCertificates() -> (any LibboxStringIteratorProtocol)? { nil }
 
     func send(_ notification: LibboxNotification?) throws {
         // No user-facing notifications from the extension for M2.
+    }
+
+    func cancelNotification(_ identifier: String?, typeID: Int32) throws {}
+
+    // Features Linko does not use (neighbor table, platform shell / SSH,
+    // Tailscale, L3 bridge) report "unsupported" so libbox never relies on them.
+
+    func startNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {
+        throw tunnelError("neighbor monitor not supported")
+    }
+
+    func closeNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {}
+
+    func registerMyInterface(_ name: String?) {}
+
+    func usePlatformShell() -> Bool { false }
+
+    func checkPlatformShell() throws {
+        throw tunnelError("platform shell not supported")
+    }
+
+    func openShellSession(
+        _ user: LibboxPlatformUser?,
+        command: String?,
+        environ: (any LibboxStringIteratorProtocol)?,
+        term: String?,
+        rows: Int32,
+        cols: Int32
+    ) throws -> any LibboxShellSessionProtocol {
+        throw tunnelError("platform shell not supported")
+    }
+
+    func lookupUser(_ username: String?) throws -> LibboxPlatformUser {
+        throw tunnelError("user lookup not supported")
+    }
+
+    func lookupSFTPServer(_ error: NSErrorPointer) -> String {
+        error?.pointee = tunnelError("SFTP server not supported")
+        return ""
+    }
+
+    func readSystemSSHHostKey(_ error: NSErrorPointer) -> String {
+        error?.pointee = tunnelError("SSH host key not supported")
+        return ""
+    }
+
+    func tailscaleHostname() -> String { "" }
+
+    func usePlatformBridge() -> Bool { false }
+
+    func createBridge(_ options: LibboxBridgeOptions?) throws -> any LibboxBridgeSessionProtocol {
+        throw tunnelError("bridge not supported")
     }
 }
 
@@ -418,6 +466,14 @@ extension TunnelPlatformInterface: LibboxCommandServerHandlerProtocol {
         try runBlocking { [self] in
             try await provider.setTunnelNetworkSettings(networkSettings)
         }
+    }
+
+    func triggerNativeCrash() throws {
+        throw tunnelError("native crash trigger not supported")
+    }
+
+    func connectSSHAgent(_ ret0_: UnsafeMutablePointer<Int32>?) throws {
+        throw tunnelError("SSH agent not supported")
     }
 
     func writeDebugMessage(_ message: String?) {

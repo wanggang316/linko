@@ -62,7 +62,7 @@ make fetch-core          # 下载 sing-box darwin 二进制 -> vendor/sing-box/
 ```
 
 `build-libbox.sh` 需要 Go 工具链;它在 sing-box 的 tagged checkout 内构建以使用其
-锁定的 sing-tun 版本（`SING_BOX_VERSION` 默认 v1.13.13）。
+锁定的 sing-tun 版本。sing-box 版本统一写在 `scripts/sing-box-version`，`build-libbox.sh` 和 `fetch-singbox.sh` 都读取它，保证扩展内核和配置校验用的二进制版本一致。
 
 ---
 

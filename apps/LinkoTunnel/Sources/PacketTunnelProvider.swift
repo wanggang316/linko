@@ -8,11 +8,11 @@ import os
 /// 'subsystem == "com.gumpw.linko.tunnel"'`).
 let tunnelLog = Logger(subsystem: "com.gumpw.linko.tunnel", category: "provider")
 
-/// The NetworkExtension packet-tunnel provider that runs sing-box (1.13.13 via
-/// libbox) in TUN global mode inside the `com.gumpw.linko.tunnel` system
-/// extension.
+/// The NetworkExtension packet-tunnel provider that runs sing-box (via libbox,
+/// version pinned in `scripts/sing-box-version`) in TUN global mode inside the
+/// `com.gumpw.linko.tunnel` system extension.
 ///
-/// Lifecycle (libbox 1.13 has no separate BoxService — the running instance
+/// Lifecycle (libbox 1.13+ has no separate BoxService — the running instance
 /// lives inside the command server):
 ///   `LibboxSetup` → `LibboxNewCommandServer` → `commandServer.start()` →
 ///   `commandServer.startOrReloadService(config)` → libbox calls back into the
@@ -117,8 +117,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         if let setupError {
             throw setupError
         }
-        LibboxSetLocale("en")
-        LibboxSetMemoryLimit(true)
+        // Leave the libbox OOM killer off (the 1.14 default): macOS has no
+        // NetworkExtension memory cap, and the killer drops live connections.
+        var localeError: NSError?
+        LibboxSetLocale("en", &localeError)
+        if let localeError {
+            throw localeError
+        }
 
         // 2. Platform interface doubles as the command-server handler.
         let platform = TunnelPlatformInterface(provider: self)

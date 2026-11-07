@@ -1,7 +1,8 @@
 #!/bin/sh
-# fetch-singbox.sh — download the latest sing-box darwin release binary
-# into vendor/sing-box/sing-box (gitignored). Idempotent: re-running when
-# the installed binary already matches the latest release is a no-op.
+# fetch-singbox.sh — download the pinned sing-box darwin release binary
+# (scripts/sing-box-version) into vendor/sing-box/sing-box (gitignored).
+# Idempotent: re-running when the installed binary already matches the
+# pinned release is a no-op. The pin keeps the binary in step with libbox.
 #
 # Requires: curl, tar, and either jq or python3 (for JSON parsing).
 set -euo pipefail
@@ -9,7 +10,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST_DIR="$REPO_ROOT/vendor/sing-box"
 DEST_BIN="$DEST_DIR/sing-box"
-API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/latest"
+SING_BOX_VERSION="${SING_BOX_VERSION:-$(cat "$REPO_ROOT/scripts/sing-box-version")}"
+API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/$SING_BOX_VERSION"
 
 # --- arch detection -------------------------------------------------------
 case "$(uname -m)" in
@@ -26,7 +28,7 @@ esac
 # GH_TOKEN). Unauthenticated requests are capped at 60/hour per IP, which CI
 # runners on shared IPs hit immediately (HTTP 403). Local runs without a token
 # use the unauthenticated path, which is fine for a single developer.
-echo "Querying latest sing-box release (darwin-$ARCH)..."
+echo "Querying sing-box $SING_BOX_VERSION release (darwin-$ARCH)..."
 GH_API_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 if [ -n "$GH_API_TOKEN" ]; then
     RELEASE_JSON="$(curl -fsSL -H "Authorization: Bearer $GH_API_TOKEN" "$API_URL")"
@@ -59,7 +61,7 @@ else
 fi
 
 if [ -z "$TAG" ] || [ "$TAG" = "null" ] || [ -z "$ASSET_URL" ]; then
-    echo "error: could not resolve a darwin-$ARCH asset in the latest release" >&2
+    echo "error: could not resolve a darwin-$ARCH asset in release $SING_BOX_VERSION" >&2
     exit 1
 fi
 

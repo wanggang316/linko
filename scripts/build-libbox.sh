@@ -9,12 +9,14 @@
 # tagged checkout uses the correct pinned dependency graph.
 set -eu
 
-SING_BOX_VERSION="${SING_BOX_VERSION:-v1.13.13}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The libbox core and the bundled sing-box binary must be the same version:
+# the app validates configs with the binary that the extension then runs.
+SING_BOX_VERSION="${SING_BOX_VERSION:-$(cat "$REPO_ROOT/scripts/sing-box-version")}"
 # Client-focused tags: gVisor TUN stack, QUIC (Hysteria2/TUIC), WireGuard,
 # uTLS (Reality client), Clash API (dashboard).
 TAGS="${TAGS:-with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api}"
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$REPO_ROOT/vendor/libbox/Libbox.xcframework"
 WORK="$(mktemp -d)"
 GOPATH="$(go env GOPATH)"
