@@ -130,8 +130,13 @@ final class WireGuardSSHNodeTests: XCTestCase {
     // MARK: - Real sing-box validation (skipped when binary absent)
 
     func testMixedWGAndSSHConfigValidatesAgainstSingBox() throws {
-        let binary = URL(fileURLWithPath:
-            "/Users/wanggang/dev/00/linko/vendor/sing-box/sing-box")
+        let binary = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // LinkoKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // LinkoKit
+            .deletingLastPathComponent() // packages
+            .deletingLastPathComponent() // repo root
+            .appendingPathComponent("vendor/sing-box/sing-box")
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: binary.path),
                           "sing-box binary not available")
 
