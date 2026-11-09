@@ -1,5 +1,33 @@
 {
   "_comment": "Chinese overlay for CHANGELOG.md. Keyed by version; sections keep their English Keep-a-Changelog names so the UI can localize them. A version with no entry here falls back to the English source, so the site never blocks on a missing translation.",
+  "0.2.0": {
+    "sections": [
+      {
+        "title": "Changed",
+        "entries": [
+          "内置代理引擎（sing-box）升级到 1.14.4。"
+        ]
+      },
+      {
+        "title": "Fixed",
+        "entries": [
+          "隧道每次重载或重启后内存不再持续上涨。",
+          "DNS 服务器单独设置解析策略时，配置不再加载失败。"
+        ]
+      }
+    ]
+  },
+  "0.1.8": {
+    "sections": [
+      {
+        "title": "Fixed",
+        "entries": [
+          "订阅定时刷新时，若节点列表没有变化，不再断开已有连接。",
+          "修复代理流量可能绕回隧道导致失败的问题，常见于网络切换或配置重载之后。"
+        ]
+      }
+    ]
+  },
   "0.1.7": {
     "sections": [
       {
