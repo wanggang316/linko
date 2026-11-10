@@ -4,8 +4,10 @@ name: release
 # against an existing tag). Builds libbox, archives + signs with Developer ID
 # and the app/extension provisioning profiles, notarizes app + DMG, generates
 # a Sparkle-signed appcast, and drafts a GitHub Release with the artifacts.
-# The release is left as a DRAFT — publishing it (manually) is what triggers
-# update-cask.yml and makes it the canonical Sparkle feed.
+# The release is left as a DRAFT. The release skill publishes it after this
+# run passes; publishing triggers update-cask.yml and pages.yml and makes it
+# the canonical Sparkle feed. Publish with a user token: a release published
+# with this workflow's GITHUB_TOKEN does not trigger other workflows.
 
 on:
   push:
@@ -18,6 +20,11 @@ on:
 
 permissions:
   contents: write
+
+# One release build at a time; never cancel a run halfway through notarization.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 # Run JS-based actions on Node 24 (Node 20 is removed from runners 2026-09-16;
 # forced to 24 from 2026-06-16). Opt in now so the version flip is a no-op.
@@ -41,6 +48,18 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      # A re-run on a tag that already has a release (draft or published)
+      # would add a second release for the same tag. Fail before the build.
+      - name: Refuse a tag that already has a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          if gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::a release for $TAG already exists; delete it before you re-run"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.meta.outputs.tag }}
@@ -59,11 +78,18 @@ jobs:
           go-version: '1.24'
           cache: false
 
-      - name: Verify tag matches project version
+      - name: Verify tag matches project version and CHANGELOG
+        env:
+          V: ${{ steps.meta.outputs.version }}
         run: |
           MV=$(awk -F'"' '/^[[:space:]]*MARKETING_VERSION:/{print $2; exit}' project.yml)
-          if [ "$MV" != "${{ steps.meta.outputs.version }}" ]; then
-            echo "::error::tag ${{ steps.meta.outputs.version }} != project.yml MARKETING_VERSION $MV"
+          if [ "$MV" != "$V" ]; then
+            echo "::error::tag $V != project.yml MARKETING_VERSION $MV"
+            exit 1
+          fi
+          # The section is the GitHub Release body and the Sparkle release notes.
+          if ! grep -qF "## [$V] - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$V] - YYYY-MM-DD' section"
             exit 1
           fi
 
@@ -144,9 +170,6 @@ jobs:
           V="${{ steps.meta.outputs.version }}"
           NOTES="$RUNNER_TEMP/notes.md"
           sed -n "/^## \[$V\]/,/^## \[/p" CHANGELOG.md | sed '$d' > "$NOTES"
-          if [ ! -s "$NOTES" ]; then
-            printf 'Linko v%s\n' "$V" > "$NOTES"
-          fi
           echo "path=$NOTES" >> "$GITHUB_OUTPUT"
 
       - name: Create draft GitHub Release
