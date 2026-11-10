@@ -29,7 +29,8 @@ struct DNSSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 600, height: 600)
+        .navigationTitle("DNS")
+        .frame(minWidth: 460, minHeight: 360)
     }
 
     // MARK: - Master switch
