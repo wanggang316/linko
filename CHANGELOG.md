@@ -18,10 +18,6 @@ appcast — the release pipeline generates it.
 
 ### Changed
 
-- The dashboard sidebar shows colored icon tiles in the style of System
-  Settings, and each section has its own icon (连接 and 节点 used the same one
-  before).
-
 ### Deprecated
 
 ### Removed
@@ -29,6 +25,13 @@ appcast — the release pipeline generates it.
 ### Fixed
 
 ### Security
+
+## [0.2.1] - 2026-11-10
+
+### Changed
+
+- **Clearer sidebar icons.** The dashboard now uses colored icon tiles,
+  with a distinct icon for each section to make navigation easier.
 
 ## [0.2.0] - 2026-11-09
 
