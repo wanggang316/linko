@@ -7,7 +7,7 @@ import SwiftUI
 
 /// The surfaces selectable from the dashboard sidebar: four observability
 /// sections plus three routing-management sections (rules / policy groups /
-/// DNS). Each carries its own SF Symbol and Chinese title so the sidebar and
+/// DNS). Each carries its own icon and Chinese title so the sidebar and
 /// the detail toolbar stay in sync from a single source of truth.
 enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview
@@ -65,23 +65,44 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// SF Symbol shown beside the title in the sidebar.
-    var symbolName: String {
+    /// Template image asset shown beside the title in the sidebar. The glyphs
+    /// are one hand-drawn set (16-point grid, 1.5-point round stroke) so every
+    /// row has the same optical weight, which mixed SF Symbols did not give.
+    var iconName: String {
         switch self {
-        case .overview: return "square.grid.2x2"
-        case .connections: return "point.3.connected.trianglepath.dotted"
-        case .traffic: return "chart.xyaxis.line"
-        case .apps: return "square.grid.3x3.fill"
-        case .logs: return "text.alignleft"
-        case .profiles: return "rectangle.stack"
-        case .networkSwitch: return "wifi.router"
-        case .subscriptions: return "antenna.radiowaves.left.and.right"
-        case .nodes: return "point.3.connected.trianglepath.dotted"
-        case .rules: return "arrow.triangle.branch"
-        case .policyGroups: return "rectangle.3.group"
-        case .dns: return "globe"
-        case .settings: return "gearshape"
+        case .overview: return "sidebar-overview"
+        case .connections: return "sidebar-connections"
+        case .traffic: return "sidebar-traffic"
+        case .apps: return "sidebar-apps"
+        case .logs: return "sidebar-logs"
+        case .profiles: return "sidebar-profiles"
+        case .networkSwitch: return "sidebar-network"
+        case .subscriptions: return "sidebar-subscriptions"
+        case .nodes: return "sidebar-nodes"
+        case .rules: return "sidebar-rules"
+        case .policyGroups: return "sidebar-policy-groups"
+        case .dns: return "sidebar-dns"
+        case .settings: return "sidebar-settings"
         }
+    }
+}
+
+// =============================================================================
+// MARK: - SidebarIcon
+// =============================================================================
+
+/// A sidebar glyph drawn from a template image asset at its 16-point design
+/// size. The tint comes from the surrounding foreground style.
+struct SidebarIcon: View {
+    let section: DashboardSection
+
+    var body: some View {
+        Image(section.iconName)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
     }
 }
 
@@ -146,26 +167,22 @@ struct DashboardView: View {
         List(selection: $selection) {
             Section("监控") {
                 ForEach(DashboardSection.monitoringSections) { section in
-                    Label(section.title, systemImage: section.symbolName)
-                        .tag(section)
+                    sidebarRow(section)
                 }
             }
             Section("配置") {
                 ForEach(DashboardSection.profileSections) { section in
-                    Label(section.title, systemImage: section.symbolName)
-                        .tag(section)
+                    sidebarRow(section)
                 }
             }
             Section("订阅") {
                 ForEach(DashboardSection.subscriptionSections) { section in
-                    Label(section.title, systemImage: section.symbolName)
-                        .tag(section)
+                    sidebarRow(section)
                 }
             }
             Section("路由") {
                 ForEach(DashboardSection.routingSections) { section in
-                    Label(section.title, systemImage: section.symbolName)
-                        .tag(section)
+                    sidebarRow(section)
                 }
             }
         }
@@ -174,6 +191,15 @@ struct DashboardView: View {
         .safeAreaInset(edge: .bottom) {
             sidebarFooter
         }
+    }
+
+    private func sidebarRow(_ section: DashboardSection) -> some View {
+        Label {
+            Text(section.title)
+        } icon: {
+            SidebarIcon(section: section)
+        }
+        .tag(section)
     }
 
     /// Persistent live/idle indicator pinned to the bottom of the sidebar so
@@ -185,8 +211,7 @@ struct DashboardView: View {
             Button {
                 selection = .settings
             } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .medium))
+                SidebarIcon(section: .settings)
                     .foregroundStyle(selection == .settings ? Theme.Color.accent : Theme.Color.secondaryLabel)
                     .frame(width: 26, height: 24)
                     .contentShape(Rectangle())
