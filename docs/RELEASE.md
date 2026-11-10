@@ -1,8 +1,10 @@
 # 发布与自动更新（Sparkle）
 
 Linko 通过 [Sparkle 2](https://sparkle-project.org) 分发应用内更新,以 Developer ID
-签名 + 公证的 DMG 形式发布到 GitHub Releases。整条流水线由 `scripts/release.sh`
-（`make release`）驱动:从归档、签名、公证到打 DMG、生成签名 appcast 一气呵成。
+签名 + 公证的 DMG 形式发布到 GitHub Releases。正式版本**只在 CI 构建**:推送 `vX.Y.Z`
+tag 触发 `.github/workflows/release.yml`,它调用 `scripts/release.sh`（`make release`）
+完成归档、签名、公证、打 DMG、生成签名 appcast,并起草 Release。完整操作步骤见
+`.claude/skills/release/SKILL.md`（release skill）。
 
 **Appcast 托管采用 GitHub 的 `releases/latest/download` 永久重定向**:
 `SUFeedURL`（见 `project.yml`）固定为
@@ -66,40 +68,54 @@ make fetch-core          # 下载 sing-box darwin 二进制 -> vendor/sing-box/
 
 ---
 
-## 3. 发布一个版本（本地）
+## 3. 发布一个版本
+
+发布走 **release PR → 合并 → 在合并后的 commit 上打 tag → CI 构建 → 发布草稿**。
+CI 强制以下契约,任一不满足即失败:
+
+> tag `vX.Y.Z` ⇔ `project.yml` 的 `MARKETING_VERSION = X.Y.Z` ⇔
+> `CHANGELOG.md` 有 `## [X.Y.Z] - YYYY-MM-DD` 小节。
 
 ```sh
-# 1) 提版本:改写 project.yml 的 MARKETING_VERSION + CURRENT_PROJECT_VERSION
-#    （build 号走 YYYYMMDDNNN,自动查已发布 appcast 的最高值 +1）并重生工程。
-make bump-version VERSION=0.2.0
+# 1) 从 origin/main 开 release 分支（--no-track 避免裸 push 推到 main）。
+git switch --no-track -c release/v0.3.0 origin/main
 
-# 2) 切 CHANGELOG:把 [Unreleased] 下的条目移到新的
-#    `## [0.2.0] - YYYY-MM-DD` 小节,顶部保留空的 [Unreleased]（六个分区标题）。
-#    这一节文本即 Sparkle 更新弹窗展示给用户的说明。
+# 2) 写 release notes:把 [Unreleased] 整理成面向用户的条目,放进
+#    `## [0.3.0] - YYYY-MM-DD`,顶部重建空的 [Unreleased];同时在
+#    apps/website/src/data/changelog.zh.json 补中文译文。
+#    版本号按 SemVer 由 notes 决定:只有 Fixed/Security → patch,否则 minor
+#    （0.y.z 阶段破坏性变更也只升 minor）。`bump-version.sh --print` 给出候选。
 
-# 3) 提交版本与 changelog（保持原子,二者一起）。
-git add project.yml CHANGELOG.md && git commit -m "chore(release): bump to 0.2.0"
-git tag v0.2.0
+# 3) 提版本（build 号走 YYYYMMDDNNN,自动查已发布 appcast 的最高值 +1）。
+make bump-version VERSION=0.3.0
 
-# 4) 跑完整流水线:archive → 公证 App → 签名 DMG → 公证 DMG → 生成签名 appcast。
-make release
-# 产物:.build/release/Linko-0.2.0.dmg(+ .sha256) 与 .build/release/appcast.xml
+# 4) 一个提交,开 PR,等 pr-build 通过后合并（rebase）。
+git add CHANGELOG.md project.yml apps/website/src/data/changelog.zh.json
+git commit -m "chore(release): bump to 0.3.0"
+git push -u origin release/v0.3.0
+gh pr create --base main --title "chore(release): bump to 0.3.0" ...
 
-# 5) 建 GitHub Release 并上传三件套(DMG、其 .sha256、appcast.xml)。
-gh release create v0.2.0 \
-  --title v0.2.0 \
-  --notes-file <(sed -n '/^## \[0.2.0\]/,/^## \[/p' CHANGELOG.md | sed '$d') \
-  .build/release/Linko-0.2.0.dmg \
-  .build/release/Linko-0.2.0.dmg.sha256 \
-  .build/release/appcast.xml
+# 5) 在合并后的 commit 上打 annotated tag 并推送,触发 release.yml。
+git tag -a v0.3.0 -m "v0.3.0" <merged-sha>
+git push origin v0.3.0
+
+# 6) CI 通过且草稿带齐 DMG、.sha256、appcast.xml 后,用本人账号发布。
+gh release edit v0.3.0 --draft=false --latest
 ```
+
+发布必须用本人 token（`gh`）完成:由 workflow 的 `GITHUB_TOKEN` 发布的 Release
+不会触发 `update-cask.yml` 与 `pages.yml`。**不要**在本地对已打 tag 的版本跑
+`make release` + `gh release create`:CI 也会构建同一 tag,结果是一个 tag 对应两个
+Release;`release.yml` 发现该 tag 已有 Release（含草稿）时会直接失败。
 
 发布后,所有已安装客户端会在
 `releases/latest/download/appcast.xml` 拉到新版本;用户也可在「设置 › 关于 › 检查更新…」
 或菜单栏底部手动触发。仅当更新包的 EdDSA 签名与内置 `SUPublicEDKey` 匹配时才会安装。
+appcast 的 `<description sparkle:format="markdown">` 来自该版本的 CHANGELOG 小节,
+即更新弹窗里展示的说明（需要 Sparkle 2.9+）。
 
-> **不要手工编辑 appcast 的 `<item>`** —— 它由 `generate_appcast` 用钥匙串私钥
-> 自动生成与签名。仓库根的 `appcast.xml` 仅为结构模板。
+> **不要手工编辑 appcast 的 `<item>`** —— 它由 `release.sh appcast` 调用
+> `generate_appcast` 生成并签名。仓库根的 `appcast.xml` 仅为结构模板。
 
 ---
 
@@ -117,15 +133,20 @@ gh release create v0.2.0 \
 
 ---
 
-## 5. CI 自动化（计划中）
+## 5. CI
 
-目标是把第 2–3 节搬进 `.github/workflows/`：`v*` tag 触发 → 在 runner 上
-`build-libbox`（Go/gomobile）+ 归档签名 → 公证 → 打包 → `generate_appcast`
-（私钥取自 secret `SPARKLE_PRIVATE_KEY`，`--ed-key-file -` 不落盘）→ 从 CHANGELOG 注入
-release notes → 起草 Release。另一条 `update-cask.yml` 在 Release 发布后把渲染好的
-Homebrew cask 推到 tap 仓库。需要的 secrets:Developer ID 证书 p12、其密码、两个描述
-文件、ASC API key、`SPARKLE_PRIVATE_KEY`、tap token。**尚未落地**,详见对齐参考
-`/Users/wanggang/dev/00/touch-code` 的 release 流水线。
+| Workflow | 触发 | 作用 |
+| --- | --- | --- |
+| `pr-build.yml` | PR / push 到 `main` | 构建 Libbox,跑 `make test`、`make test-app`,无签名 Release 构建 |
+| `release.yml` | 推送 `v*` tag / 手动指定已有 tag | 校验契约 → 构建 Libbox → 签名归档 → 公证 → DMG → appcast → 起草 Release |
+| `update-cask.yml` | Release 发布 | 渲染 Homebrew cask 推到 `wanggang316/homebrew-tap` |
+| `pages.yml` | push 到 `main` / Release 发布 | 构建并部署官网（读取 CHANGELOG 与版本号） |
+
+`release.yml` 所需 secrets:`DEVELOPER_ID_CERT_P12_BASE64`、`DEVELOPER_ID_CERT_PASSWORD`、
+`KEYCHAIN_PASSWORD`、`PROVISION_PROFILE_APP_BASE64`、`PROVISION_PROFILE_EXT_BASE64`、
+`AC_API_KEY_ID`、`AC_API_ISSUER_ID`、`AC_API_KEY_P8`、`SPARKLE_PRIVATE_KEY`;
+`update-cask.yml` 另需 `HOMEBREW_TAP_TOKEN`。第 1 节的本机凭据只用于本地调试
+`release.sh` 的单步子命令。
 
 ---
 
