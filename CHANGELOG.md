@@ -26,6 +26,13 @@ appcast — the release pipeline generates it.
 
 ### Security
 
+## [0.2.2] - 2026-11-10
+
+### Fixed
+
+- **Policy groups and DNS layout.** Both pages now show their own title and
+  fill the dashboard's detail area instead of staying at a fixed size.
+
 ## [0.2.1] - 2026-11-10
 
 ### Changed
