@@ -1,5 +1,15 @@
 {
   "_comment": "Chinese overlay for CHANGELOG.md. Keyed by version; sections keep their English Keep-a-Changelog names so the UI can localize them. A version with no entry here falls back to the English source, so the site never blocks on a missing translation.",
+  "0.2.2": {
+    "sections": [
+      {
+        "title": "Fixed",
+        "entries": [
+          "**策略组和 DNS 页面布局。** 两个页面现在显示各自的标题，并填满仪表盘详情区域，不再限制为固定尺寸。"
+        ]
+      }
+    ]
+  },
   "0.2.1": {
     "sections": [
       {
