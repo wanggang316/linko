@@ -21,8 +21,8 @@ into Sparkle's update dialog. It is published prose, not a work record.
 Sparkle clients update from
 `https://github.com/wanggang316/linko/releases/latest/download/appcast.xml`,
 which resolves to the newest **published, non-prerelease** release.
-Publishing also triggers `update-cask.yml` (Homebrew tap) and `pages.yml`
-(the site).
+Publishing also triggers `update-cask.yml` (Homebrew tap). The site
+(`pages.yml`) redeploys when the release PR merges, not on publish.
 
 The release is built **only in CI**. Never run `make release` and
 `gh release create` locally for a tagged version: CI also builds the tag, and
@@ -207,7 +207,7 @@ leave the draft and go to Recovery. Keep the draft only when the user asked
 for it. Never mark it a prerelease: the canonical feed skips prereleases.
 
 Publish from this session, not from CI: a release that the workflow's
-`GITHUB_TOKEN` publishes does not trigger `update-cask.yml` or `pages.yml`.
+`GITHUB_TOKEN` publishes does not trigger `update-cask.yml`.
 
 Then verify and report the release URL:
 

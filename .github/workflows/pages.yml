@@ -2,9 +2,10 @@ name: pages
 
 # Builds the marketing site in `apps/website/` and publishes it to GitHub
 # Pages. The site reads CHANGELOG.md and project.yml from the repository root
-# at build time, so a release commit republishes the changelog and the version
-# on its own. configure-pages enables the Pages site (GitHub Actions source)
-# on first run.
+# at build time, so the merge of a release PR republishes the changelog and
+# the version on its own. There is no `release` trigger: a release event runs
+# on the tag ref, which the github-pages environment (main only) rejects.
+# configure-pages enables the Pages site (GitHub Actions source) on first run.
 
 on:
   push:
@@ -14,8 +15,6 @@ on:
       - 'CHANGELOG.md'
       - 'project.yml'
       - '.github/workflows/pages.yml'
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
