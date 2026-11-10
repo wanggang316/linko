@@ -1,0 +1,89 @@
+name: pr-build
+
+# Build and test every pull request on the same runner and Xcode as
+# release.yml, so a change that breaks the release build fails on the PR
+# instead of after the tag push. The build is unsigned and needs no secrets.
+#
+# It also runs on pushes to main. A pull request can restore only caches that
+# its own runs or main saved, so the main runs keep the Libbox cache warm.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/LinkoApp/**'
+      - 'apps/LinkoTunnel/**'
+      - 'packages/**'
+      - 'project.yml'
+      - 'scripts/build-libbox.sh'
+      - 'scripts/sing-box-version'
+      - 'Makefile'
+      - '.github/workflows/pr-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/LinkoApp/**'
+      - 'apps/LinkoTunnel/**'
+      - 'packages/**'
+      - 'project.yml'
+      - 'scripts/build-libbox.sh'
+      - 'scripts/sing-box-version'
+      - 'Makefile'
+      - '.github/workflows/pr-build.yml'
+  workflow_dispatch: {}
+
+# A new push to a pull request cancels its older run. Runs on main are not
+# cancelled, so each one can save its caches.
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same selection as release.yml.
+      - name: Select Xcode 26
+        run: |
+          DEV=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          sudo xcode-select -s "${DEV:-/Applications/Xcode.app}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      # Same key as release.yml.
+      - name: Cache Libbox.xcframework
+        id: libbox-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/libbox
+          key: libbox-${{ hashFiles('scripts/build-libbox.sh', 'scripts/sing-box-version') }}
+
+      - name: Build Libbox.xcframework
+        if: steps.libbox-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-libbox.sh
+
+      - name: Test LinkoKit
+        run: make test
+
+      - name: Test the app layer
+        run: make test-app
+
+      # Release configuration, like `release.sh archive`, without signing.
+      - name: Build Linko (Release, unsigned)
+        run: make build CONFIG=Release
