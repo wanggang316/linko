@@ -24,6 +24,10 @@ final class QuickAddRuleViewSizingTests: XCTestCase {
     private let windowWidth: CGFloat = 460
     /// Nothing here should ever ask for a window taller than a laptop screen.
     private let maximumWindowHeight: CGFloat = 640
+    /// `fittingSize` rounds up to whole backing pixels and `sizeThatFits`
+    /// does not. On a 1x display (a CI runner) a pixel is a full point, so
+    /// the two can differ by up to 1pt for the same content.
+    private let pixelTolerance: CGFloat = 1
 
     override func setUp() {
         super.setUp()
@@ -38,11 +42,11 @@ final class QuickAddRuleViewSizingTests: XCTestCase {
         for state in Self.renderableStates {
             let range = try await heightRange(for: state)
             XCTAssertEqual(
-                range.minimum, range.ideal, accuracy: 0.5,
+                range.minimum, range.ideal, accuracy: pixelTolerance,
                 "\(state) can be squeezed to \(range.minimum)pt below its \(range.ideal)pt content"
             )
             XCTAssertEqual(
-                range.maximum, range.ideal, accuracy: 0.5,
+                range.maximum, range.ideal, accuracy: pixelTolerance,
                 "\(state) can be stretched to \(range.maximum)pt above its \(range.ideal)pt content"
             )
         }
