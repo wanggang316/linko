@@ -1,5 +1,15 @@
 {
   "_comment": "Chinese overlay for CHANGELOG.md. Keyed by version; sections keep their English Keep-a-Changelog names so the UI can localize them. A version with no entry here falls back to the English source, so the site never blocks on a missing translation.",
+  "0.2.1": {
+    "sections": [
+      {
+        "title": "Changed",
+        "entries": [
+          "**更清晰的侧边栏图标。** 仪表盘现在使用彩色图标方块，各页面都有独立图标，便于识别和切换。"
+        ]
+      }
+    ]
+  },
   "0.2.0": {
     "sections": [
       {
