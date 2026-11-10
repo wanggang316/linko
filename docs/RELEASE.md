@@ -104,7 +104,7 @@ gh release edit v0.3.0 --draft=false --latest
 ```
 
 发布必须用本人 token（`gh`）完成:由 workflow 的 `GITHUB_TOKEN` 发布的 Release
-不会触发 `update-cask.yml` 与 `pages.yml`。**不要**在本地对已打 tag 的版本跑
+不会触发 `update-cask.yml`。**不要**在本地对已打 tag 的版本跑
 `make release` + `gh release create`:CI 也会构建同一 tag,结果是一个 tag 对应两个
 Release;`release.yml` 发现该 tag 已有 Release（含草稿）时会直接失败。
 
@@ -140,7 +140,7 @@ appcast 的 `<description sparkle:format="markdown">` 来自该版本的 CHANGEL
 | `pr-build.yml` | PR / push 到 `main` | 构建 Libbox,跑 `make test`、`make test-app`,无签名 Release 构建 |
 | `release.yml` | 推送 `v*` tag / 手动指定已有 tag | 校验契约 → 构建 Libbox → 签名归档 → 公证 → DMG → appcast → 起草 Release |
 | `update-cask.yml` | Release 发布 | 渲染 Homebrew cask 推到 `wanggang316/homebrew-tap` |
-| `pages.yml` | push 到 `main` / Release 发布 | 构建并部署官网（读取 CHANGELOG 与版本号） |
+| `pages.yml` | push 到 `main`（含 release PR 合并） | 构建并部署官网（读取 CHANGELOG 与版本号） |
 
 `release.yml` 所需 secrets:`DEVELOPER_ID_CERT_P12_BASE64`、`DEVELOPER_ID_CERT_PASSWORD`、
 `KEYCHAIN_PASSWORD`、`PROVISION_PROFILE_APP_BASE64`、`PROVISION_PROFILE_EXT_BASE64`、

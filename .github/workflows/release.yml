@@ -5,7 +5,7 @@ name: release
 # and the app/extension provisioning profiles, notarizes app + DMG, generates
 # a Sparkle-signed appcast, and drafts a GitHub Release with the artifacts.
 # The release is left as a DRAFT. The release skill publishes it after this
-# run passes; publishing triggers update-cask.yml and pages.yml and makes it
+# run passes; publishing triggers update-cask.yml and makes it
 # the canonical Sparkle feed. Publish with a user token: a release published
 # with this workflow's GITHUB_TOKEN does not trigger other workflows.
 
