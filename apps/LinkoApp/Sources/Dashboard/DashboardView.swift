@@ -65,44 +65,25 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Template image asset shown beside the title in the sidebar. The glyphs
-    /// are one hand-drawn set (16-point grid, 1.5-point round stroke) so every
-    /// row has the same optical weight, which mixed SF Symbols did not give.
-    var iconName: String {
+    /// Sidebar icon: a colored tile with a white glyph, in the style of System
+    /// Settings. 设置 has no sidebar row (the footer gear opens it); its style
+    /// is here so that the switch covers every case.
+    var iconStyle: SidebarIconTile.Style {
         switch self {
-        case .overview: return "sidebar-overview"
-        case .connections: return "sidebar-connections"
-        case .traffic: return "sidebar-traffic"
-        case .apps: return "sidebar-apps"
-        case .logs: return "sidebar-logs"
-        case .profiles: return "sidebar-profiles"
-        case .networkSwitch: return "sidebar-network"
-        case .subscriptions: return "sidebar-subscriptions"
-        case .nodes: return "sidebar-nodes"
-        case .rules: return "sidebar-rules"
-        case .policyGroups: return "sidebar-policy-groups"
-        case .dns: return "sidebar-dns"
-        case .settings: return "sidebar-settings"
+        case .overview: return .init("gauge.with.needle.fill", .blue)
+        case .connections: return .init("arrow.left.arrow.right", .green)
+        case .traffic: return .init("chart.bar.fill", .orange)
+        case .apps: return .init("square.grid.2x2.fill", .purple)
+        case .logs: return .init("text.alignleft", .gray)
+        case .profiles: return .init("square.stack.3d.up.fill", .indigo)
+        case .networkSwitch: return .init("wifi", size: 14, .teal)
+        case .subscriptions: return .init("dot.radiowaves.up.forward", .red)
+        case .nodes: return .init("server.rack", .graphite)
+        case .rules: return .init("arrow.triangle.branch", .magenta)
+        case .policyGroups: return .init("rectangle.3.group.fill", size: 14, .orange)
+        case .dns: return .init("globe", .blue)
+        case .settings: return .init("gearshape.fill", .gray)
         }
-    }
-}
-
-// =============================================================================
-// MARK: - SidebarIcon
-// =============================================================================
-
-/// A sidebar glyph drawn from a template image asset at its 16-point design
-/// size. The tint comes from the surrounding foreground style.
-struct SidebarIcon: View {
-    let section: DashboardSection
-
-    var body: some View {
-        Image(section.iconName)
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .frame(width: 16, height: 16)
-            .accessibilityHidden(true)
     }
 }
 
@@ -197,7 +178,7 @@ struct DashboardView: View {
         Label {
             Text(section.title)
         } icon: {
-            SidebarIcon(section: section)
+            SidebarIconTile(style: section.iconStyle)
         }
         .tag(section)
     }
@@ -211,7 +192,8 @@ struct DashboardView: View {
             Button {
                 selection = .settings
             } label: {
-                SidebarIcon(section: .settings)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(selection == .settings ? Theme.Color.accent : Theme.Color.secondaryLabel)
                     .frame(width: 26, height: 24)
                     .contentShape(Rectangle())
