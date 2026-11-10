@@ -1,308 +1,243 @@
 ---
 name: release
-description: Cut a Linko release. Bump the shared version in project.yml, promote CHANGELOG [Unreleased] to a dated section, commit atomically, build+sign+notarize+package locally via `make release`, tag vX.Y.Z, and publish the signed DMG + appcast.xml to GitHub Releases. Use when shipping a new build to Sparkle clients.
+description: Cut a Linko release through a pull request. Write the release notes into CHANGELOG (and its Chinese site overlay), pick the Semantic Versioning bump from them, bump the version in project.yml, open a release PR, and after it merges tag the merged commit vX.Y.Z to trigger the GitHub Actions Developer-ID release pipeline, and publish the release once it passes. Use when shipping a new build to Sparkle and Homebrew clients.
 ---
 
 # release: Cut a Linko release
 
-## Overview
-
-A Linko release is produced **locally** by the Developer ID pipeline
-(`scripts/release.sh`, run via `make release`): it archives, signs with
-Developer ID, notarizes, builds a signed DMG, and generates a
-Sparkle-signed `appcast.xml`. You then publish those artifacts to a GitHub
-Release. Sparkle clients update from the **canonical feed**
-
-> `https://github.com/wanggang316/linko/releases/latest/download/appcast.xml`
-
-which GitHub serves from the most recent **non-prerelease** Release. So the
-release contract is:
+A release is **a release PR, then a tag push**. The PR lands the version bump
+and the release notes on `main`. The tag `vX.Y.Z` on the merged commit fires
+`.github/workflows/release.yml`: it builds Libbox, archives, signs,
+notarizes, writes a Sparkle `appcast.xml` with the release notes, and opens a
+**draft** GitHub Release, which this skill publishes once the run passes. The
+contract CI enforces:
 
 > tag `vX.Y.Z` ⇔ `MARKETING_VERSION = X.Y.Z` in `project.yml` ⇔
-> `CHANGELOG.md` has a `## [X.Y.Z] - YYYY-MM-DD` section ⇔ a GitHub Release
-> `vX.Y.Z` (not prerelease) carrying `Linko-X.Y.Z.dmg`, its `.sha256`, and
-> `appcast.xml`.
+> `CHANGELOG.md` has `## [X.Y.Z] - YYYY-MM-DD`.
 
-This skill walks those artifacts into alignment, builds and signs locally,
-tags, pushes, publishes, and verifies the feed is live.
+CI copies that CHANGELOG section verbatim into the GitHub Release body and
+into Sparkle's update dialog. It is published prose, not a work record.
 
-> Forward note: CI automation (`.github/workflows/release.yml`) is planned
-> but not yet in place (see `docs/RELEASE.md` §5). Until it lands, releases
-> are cut locally with this skill. When CI exists, step 6 (local build) is
-> replaced by a tag push that triggers the pipeline; the rest is unchanged.
+Sparkle clients update from
+`https://github.com/wanggang316/linko/releases/latest/download/appcast.xml`,
+which resolves to the newest **published, non-prerelease** release.
+Publishing also triggers `update-cask.yml` (Homebrew tap) and `pages.yml`
+(the site).
 
-## When to use
+The release is built **only in CI**. Never run `make release` and
+`gh release create` locally for a tagged version: CI also builds the tag, and
+the result is two releases for one tag.
 
-- Ready to ship a new build to GitHub Releases / Sparkle clients.
-- `[Unreleased]` in `CHANGELOG.md` has user-visible entries worth a release.
-
-**Don't use** for:
-- Fixing the release scripts themselves (no version bump).
-- Local-only experiments — never tag without intent to publish.
-
-## One-time prerequisites (verify, don't assume)
-
-These must be set up on the machine before a release can succeed. The skill
-checks them in pre-flight and bails with the fix command if any is missing.
-
-| Prerequisite | Check | Fix |
-|---|---|---|
-| Developer ID Application cert | `security find-identity -v -p codesigning \| grep "Developer ID Application"` | Import the `.p12` into the login keychain |
-| Provisioning profiles | `Linko DeveloperID` (app) + `LinkoTunnel DeveloperID` (extension) installed | Download from developer.apple.com; Xcode installs them under `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` |
-| Notary credentials | `xcrun notarytool history --keychain-profile linko-notary` succeeds | `xcrun notarytool store-credentials linko-notary --apple-id <id> --team-id HC438T2B8P` |
-| Vendored core | `vendor/sing-box/sing-box` + `vendor/libbox/Libbox.xcframework` exist | `make fetch-core && ./scripts/build-libbox.sh` (needs Go) |
-| Sparkle EdDSA key | private key in login keychain (public key already in `project.yml`) | `generate_keys -f <backup>` to restore |
-
-## Project facts (load before acting)
-
-| Concern | Where it lives |
-|---|---|
-| Marketing version + build number | `project.yml` → top-level `settings.base` → `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` (YYYYMMDDNNN). Shared by the app and the embedded system extension. |
-| Bump tool | `scripts/bump-version.sh` (via `make bump-version VERSION=X.Y.Z`) — rewrites project.yml atomically and runs `xcodegen generate` |
-| User-visible changelog | `CHANGELOG.md` (repo root) — entries written in **English** |
-| Release pipeline | `scripts/release.sh` via `make release` (archive → notarize → DMG → notarize → appcast) |
-| Tag format | `vX.Y.Z`, annotated |
-| Distribution unit | DMG (notarized + stapled). Sparkle clients update from it. |
-| Canonical feed | `releases/latest/download/appcast.xml` (newest non-prerelease release) |
-| Bump commit style | `chore(release): bump to X.Y.Z` (project.yml + CHANGELOG.md only). **No attribution trailer** (Linko convention). |
-
-`MARKETING_VERSION` is **not** strict SemVer pre-1.0 — every release is a
-developer build (per the `CHANGELOG.md` preamble). Default cadence is patch;
-bump minor when behavior is materially different.
+Don't use this for fixing the release pipeline itself (no version bump).
+Never push to `main` directly; every release change goes through a PR.
 
 ## Process
 
-### 0. Pre-flight — refuse to proceed if any check fails
+The release PR is the single gate. Run steps 1–6 without stopping: they write
+only to a release branch and an open PR, which is the review surface. After
+the user approves the merge in step 7, run steps 7–9 without stopping, up to
+the published release.
 
-Run via `Bash` (parallelizable):
+### 1. Pre-flight
 
 ```bash
-git rev-parse --abbrev-ref HEAD                 # expect 'main' (else confirm with user)
-git status --porcelain                          # expect empty
-git fetch origin --tags                         # refresh
-git tag --sort=-creatordate | head -3           # recent tags
-./scripts/bump-version.sh --print               # current version + suggested next
-security find-identity -v -p codesigning | grep "Developer ID Application" || echo "MISSING cert"
-test -f vendor/sing-box/sing-box && test -d vendor/libbox/Libbox.xcframework && echo "vendor OK" || echo "MISSING vendor — run: make fetch-core && ./scripts/build-libbox.sh"
-xcrun notarytool history --keychain-profile linko-notary >/dev/null 2>&1 && echo "notary OK" || echo "MISSING notary profile linko-notary"
-# both Developer ID profiles must be installed (archive signs the app + extension):
-for n in "Linko DeveloperID" "LinkoTunnel DeveloperID"; do
-  find ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles -name '*.provisionprofile' 2>/dev/null \
-    -exec sh -c 'security cms -D -i "$1" 2>/dev/null | plutil -extract Name raw - 2>/dev/null' _ {} \; \
-    | grep -qxF "$n" && echo "profile OK: $n" || echo "MISSING profile: $n"
-done
+git status --porcelain                  # empty
+git fetch origin --tags
+./scripts/bump-version.sh --print       # current version, next build, next patch / minor / major
+gh pr list --search 'head:release/'     # no open release PR
+gh release list --limit 3               # no leftover draft for the target tag
 ```
 
-Bail with a clear message if any of these are wrong:
-- Not on `main` and the user hasn't approved an off-`main` release.
-- Working tree dirty.
-- A tag for the proposed version already exists.
-- Any prerequisite (cert / profiles / notary / vendor) missing — print the
-  fix from the table above; profiles and notary credentials require the
-  user (they involve Apple credentials and can't be set up unattended).
+Stop if the tree is dirty, a release PR is already open, the target tag
+already exists, or a release (draft or published) already exists for it.
 
-### 1. Decide the version — ask the user
+### 2. Write the release notes
 
-1. Read current `MARKETING_VERSION` and the `## [Unreleased]` section of `CHANGELOG.md`.
-2. Propose **patch** by default (`0.1.0 → 0.1.1`).
-3. Show a summary table:
+`[Unreleased]` is **input, not output**: it collects one bullet per PR, so a
+single feature arrives with several bullets from different stages. Never
+promote it as-is. Always cross-check it against
+`git log --no-merges --pretty='%h %s' "$(git describe --tags --abbrev=0 --match 'v[0-9]*' origin/main)..origin/main"`
+and keep only what a user can perceive.
 
-   ```
-   Current: 0.1.0 (build 20260611001)
-   Next:    0.1.1 (build 20260612001)  <-- patch (default; build from appcast +1 / new day)
-   Or:      0.2.0 (build 20260612001)  <-- minor (user-visible scope changed)
+**Consolidate.**
+- One entry per user-visible surface (a feature area, the menu bar, a
+  dashboard page, a Settings pane) per category, however many bullets it had.
+- Describe the end state. Superseded work is dropped, not merged.
+- Fold small polish on one area into a single bullet.
+- A release reads as **1–8 entries**.
 
-   Unreleased highlights:
-     Added — ...
-     Fixed — ...
-   ```
+**Keep each entry to three lines** (~240 characters, as the file wraps): a
+bold lead-in a skimming user can stop at, then at most two sentences. A
+one-line fix needs no lead-in.
 
-4. Wait for explicit confirmation of `X.Y.Z` before proceeding.
-   **Never invent a version silently.**
-
-### 2. Verify the changelog has shippable content
-
-If `[Unreleased]` is empty (only category headers, no entries), **stop** and
-ask the user to record what shipped, then resume.
-
-**Writing style — user-facing, in English.** The CHANGELOG follows
-[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) — entries are
-*for humans*. Rewrite raw commit messages; never paste them. Each entry
-doubles as the text shown in Sparkle's update dialog.
-
-Six standard categories: `Added` (new features) / `Changed` (changes to
-existing behavior) / `Deprecated` (going away, still works) / `Removed` (gone
-this version) / `Fixed` (bug fixes) / `Security` (vulnerability fixes).
-
-Bullet rules, in priority order (earlier wins on conflict):
-
-1. **Describe what the user gets.** Lead with the feature/outcome, or — for
-   bugs — the symptom that's now gone. Skip the mechanism.
-2. **Clarity beats brevity.** One or two short lines per entry; three means
-   it's doing too much.
-3. **Skip engineering-only changes.** Refactors, renames, CI tweaks, dep
-   bumps — out (git log is their home). Two exceptions always make the cut:
-   user-perceivable side effects (min-OS bump, faster startup → `Changed`,
-   describe the impact) and deprecations/removals/breaking changes.
-4. **Drop developer jargon.** No commit prefixes, PR/issue numbers, hashes,
-   module or type names, protocol terms. Refer to features by the UI surface
-   the user sees ("Settings → About", "the menu bar").
-5. **Consolidate within a release.** Fold commits that chased the same
-   bug/feature into one entry naming the end state; bundle tiny polish into
-   one bullet.
-
-Sanity check each entry: *would a user who only uses the app care, and could
-they understand it?* If either is "no", rewrite or drop.
-
-### 3. Cut the changelog version section
-
-Edit `CHANGELOG.md`:
-
-1. Replace `## [Unreleased]` with **two** sections:
-   - A fresh empty `## [Unreleased]` at top with all six headers, left empty.
-   - The previous `[Unreleased]` body promoted under
-     `## [X.Y.Z] - YYYY-MM-DD` (today's date, user's local TZ — get it from
-     `date +%F`, never from memory).
-2. If a placeholder `## [X.Y.Z] - 未发布` already exists for this version
-   (the first release seeded one), fill in the real date and drop any
-   "未发布" marker.
-3. Show the diff to the user before writing.
-
-### 4. Bump the version files
-
-```bash
-make bump-version VERSION=X.Y.Z
-# explicit build override (rarely needed):
-make bump-version VERSION=X.Y.Z BUILD=YYYYMMDDNNN
+```markdown
+- **Quick rule from the browser.** A menu bar action reads the page in the
+  front browser, suggests domain patterns, and saves a routing rule without
+  opening the dashboard.
 ```
 
-`scripts/bump-version.sh` validates semver, refuses a non-increasing
-version, computes the next `YYYYMMDDNNN` build from the published appcast,
-rewrites `project.yml` atomically (tmpfile + post-write verification), and
-runs `xcodegen generate`. **Do not hand-edit** the version in `project.yml`
-— the script is the rule.
+**Write for users.**
+- Lead with what the user gets or the symptom that's gone, not the mechanism.
+- Leave out engineering-only work (refactors, CI, lint, dependency bumps).
+  Exceptions that are always listed: user-perceivable side effects
+  (minimum-OS bump, a new sing-box core) and anything deprecated, removed,
+  or breaking.
+- No commit prefixes, PR / issue numbers, hashes, type or module names, or
+  protocol jargon. Name the UI surface the user sees.
 
-> Note: this regenerates `Linko.xcodeproj` (gitignored), so the working tree
-> stays clean except for `project.yml`.
+Categories follow Keep a Changelog 1.1.0: `Added`, `Changed`, `Deprecated`,
+`Removed`, `Fixed`, `Security`.
 
-### 5. Commit — only the two bumped files (atomic)
+### 3. Choose the version
+
+Versions follow Semantic Versioning 2.0.0. Derive the bump from the notes of
+step 2 — they are the user-visible change set — not from commit prefixes:
+
+| The release contains | Bump |
+|---|---|
+| A breaking change: anything under `Removed`, or a `Changed` entry that breaks a config, subscription, or rule format the user relies on | **major** — but **minor** while the version is `0.y.z` |
+| Anything under `Added`, `Changed`, or `Deprecated` | **minor** |
+| Only `Fixed` and `Security` | **patch** |
+
+The highest row wins. Take the number from `bump-version.sh --print`. Never
+bump to `1.0.0` on your own; going to 1.0 is the user's call.
+
+This step is not a gate: state the version and the row that chose it, and go
+on. The user corrects it in the PR if needed.
+
+### 4. Branch, edit the notes, bump
 
 ```bash
-git add project.yml CHANGELOG.md
-git status            # confirm ONLY those two are staged
-git diff --cached     # final eyeball
+git switch --no-track -c release/vX.Y.Z origin/main
+```
+
+`--no-track` matters: a branch started from `origin/main` otherwise tracks
+`main`, and a bare `git push` would push to `main`.
+
+1. In `CHANGELOG.md`, put the notes of step 2 under
+   `## [X.Y.Z] - YYYY-MM-DD` (today from `date +%F`, never from memory), drop
+   its empty categories, and reseed an empty `## [Unreleased]` above it with
+   all six headers.
+2. In `apps/website/src/data/changelog.zh.json`, add an `"X.Y.Z"` entry at
+   the top with the same sections (English section titles) and the entries
+   translated to Chinese. Keep the bold lead-ins.
+3. Bump the version:
+
+   ```bash
+   make bump-version VERSION=X.Y.Z   # BUILD=N overrides the build number (rare)
+   ```
+
+   The script owns the version in `project.yml`: it validates the version,
+   takes the next `YYYYMMDDNNN` build from the published appcast, writes
+   atomically, and runs `xcodegen generate`. Never hand-edit the version.
+
+Skip a local build; the PR check and the release pipeline build it.
+
+### 5. Commit and push
+
+Stage only the release files, in one commit, with no trailers:
+
+```bash
+git add CHANGELOG.md project.yml apps/website/src/data/changelog.zh.json
 git commit -m "chore(release): bump to X.Y.Z"
+git push -u origin release/vX.Y.Z
 ```
 
-Pre-1.0 the version bump and changelog stay in **one** commit. **No
-Co-Authored-By / attribution trailer** (Linko convention). Show the staged
-diff to the user before committing.
-
-### 6. Build, sign, notarize, package locally
+### 6. Open the release PR
 
 ```bash
-make release
-```
+gh pr create --base main --head release/vX.Y.Z \
+  --title "chore(release): bump to X.Y.Z" --body-file - <<'EOF'
+Release X.Y.Z (build N): <bump> because <row of step 3>.
 
-This runs the full pipeline (~10–20 min including the notary wait):
-archive → notarize app → signed DMG → notarize DMG → signed appcast. It
-emits into `.build/release/`:
-- `Linko-X.Y.Z.dmg` (+ `.sha256`)
-- `appcast.xml`
+<the new CHANGELOG section, verbatim>
 
-If it fails, **stop and diagnose** before tagging — nothing is published
-yet, so a failure here is cheap. Common failures: `build-libbox.sh` (Go /
-gomobile environment), archive (provisioning profile not installed or
-expired), notarization (`xcrun notarytool log <id>` for the reason). See
-Failure modes below.
-
-> Building **before** tagging (unlike a CI flow that builds after the tag
-> push) is deliberate: a local cut can prove the artifacts are good before
-> committing a tag to history.
-
-### 7. Tag — annotated, with release highlights
-
-```bash
-git tag -a vX.Y.Z -m "$(cat <<'EOF'
-vX.Y.Z
-
-<one short paragraph in user-facing English summarizing the release —
-what's new / improved / fixed, pulled from the CHANGELOG, no mechanism>
+Merging this PR does not release. After merge, tag the merged commit
+`vX.Y.Z` to start the release pipeline.
 EOF
-)"
-git show vX.Y.Z --stat       # let the user eyeball it
 ```
 
-Always annotated, never lightweight. The annotation message surfaces on the
-GitHub Release page.
+Not a draft. No agent names in the title or body. Then wait for the checks:
+`gh pr checks <PR> --watch` (`pr-build` runs because `project.yml` changed).
 
-### 8. Push — commit first, tag second
+### 7. Merge — the only gate
+
+Report the PR URL, the version, and the check result, and wait for the user
+to approve the merge. Edits the user asks for go onto the release branch as
+new commits. If `main` gained user-visible changes since step 2, update the
+notes (and, if the bump row changed, the version) before the merge.
 
 ```bash
-git push origin main
-git push origin vX.Y.Z
+gh pr merge <PR> --rebase
+git push origin --delete release/vX.Y.Z
 ```
 
-### 9. Publish the GitHub Release
+Rebase keeps the bump commit as is on `main`. Don't pass `--delete-branch`:
+it fails when `main` is checked out in another worktree.
+
+### 8. Tag the merged commit and push the tag
+
+The user's merge approval covers this step and step 9.
 
 ```bash
-gh release create vX.Y.Z \
-  --title vX.Y.Z \
-  --notes-file <(sed -n '/^## \[X.Y.Z\]/,/^## \[/p' CHANGELOG.md | sed '$d') \
-  .build/release/Linko-X.Y.Z.dmg \
-  .build/release/Linko-X.Y.Z.dmg.sha256 \
-  .build/release/appcast.xml
+SHA=$(gh pr view <PR> --json mergeCommit --jq .mergeCommit.oid)
+git fetch origin
+git merge-base --is-ancestor "$SHA" origin/main                   # on main
+git show "$SHA:project.yml" | grep -E '^[[:space:]]*MARKETING_VERSION: "X\.Y\.Z"$'
+git tag -a vX.Y.Z -m "vX.Y.Z" "$SHA"
+git push origin vX.Y.Z                                            # triggers release.yml
 ```
 
-**Must NOT be a prerelease** — the canonical feed
-(`releases/latest/download/appcast.xml`) only resolves to non-prerelease
-releases, so a prerelease would not reach clients. Default to publishing
-directly; pass `--draft` only if the user wants to eyeball the release page
-before it goes live (then `gh release edit vX.Y.Z --draft=false` to ship).
+Always an annotated tag on the merged commit — never on the local branch
+commit, which the rebase replaced.
 
-### 10. Verify the feed is live
+### 9. Wait for CI, then publish the release
 
 ```bash
-gh release view vX.Y.Z
+RUN=$(gh run list --workflow=release.yml --event push --branch vX.Y.Z \
+  --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$RUN" --exit-status
+gh release view vX.Y.Z --json isDraft,assets --jq '{isDraft, assets: [.assets[].name]}'
+gh release edit vX.Y.Z --draft=false --latest
+```
+
+Publish only when the run passed and the draft has all three assets:
+`Linko-X.Y.Z.dmg`, `Linko-X.Y.Z.dmg.sha256`, and `appcast.xml`. Otherwise
+leave the draft and go to Recovery. Keep the draft only when the user asked
+for it. Never mark it a prerelease: the canonical feed skips prereleases.
+
+Publish from this session, not from CI: a release that the workflow's
+`GITHUB_TOKEN` publishes does not trigger `update-cask.yml` or `pages.yml`.
+
+Then verify and report the release URL:
+
+```bash
+gh run list --workflow=update-cask.yml --limit 1     # cask run started
 curl -fsSL https://github.com/wanggang316/linko/releases/latest/download/appcast.xml \
-  | grep -E "sparkle:version|shortVersionString|enclosure url" | head
+  | grep -E 'shortVersionString|enclosure url|<description'
 ```
 
-Confirm the appcast resolves and its top item is the new version with an
-`enclosure url` pointing at the just-uploaded DMG. Tell the user the
-release is live and clients will see it on their next Sparkle check.
+The feed's top item must be `X.Y.Z`, point at the new DMG, and carry a
+`<description>` with the release notes.
 
-## Failure modes & recovery
+## Recovery
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `build-libbox.sh` fails | Go/gomobile env, or sing-box tag drift | Ensure Go is installed; re-run; check `SING_BOX_VERSION` |
-| Archive: "no profile matching ..." | `Linko DeveloperID` / `LinkoTunnel DeveloperID` profile not installed or expired | Re-download from developer.apple.com into `~/Library/MobileDevice/Provisioning Profiles/` |
-| Archive produced ad-hoc signature | Developer ID cert not in keychain | `security find-identity -v -p codesigning`; import the `.p12` |
-| Notarization fails | Apple-side flag, or stale embedded helper signed ad-hoc | `xcrun notarytool log <id>`; often the nested re-sign — verify `resign-nested.sh` covered the offending binary |
-| Wrong version tagged | Bumped to the wrong number | Roll forward only — supersede with a new tag. **Never** rewrite `main` history. |
-| Published release broken/unsafe | Bug or signing issue surfaces post-publish | Mark YANKED, don't delete: edit `CHANGELOG.md` header to `## [X.Y.Z] - YYYY-MM-DD [YANKED]` with a reason, commit on `main`, cut a follow-up fix version. The loud `[YANKED]` is intentional. |
-| Feed didn't update after publish | Release marked prerelease, or `appcast.xml` not attached | Un-prerelease the release; ensure `appcast.xml` is among its assets (re-run `release.sh appcast` + `gh release upload --clobber`) |
+Roll forward; never force-push `main` or rewrite its history. Fixes to `main`
+go through a PR. Deleting a pushed tag or a release needs explicit user
+approval.
 
-## Verification checklist
+| Symptom | Fix |
+|---|---|
+| CI: tag ≠ `MARKETING_VERSION` | The tag points at the wrong commit: with approval, delete it (`git tag -d vX.Y.Z; git push origin :refs/tags/vX.Y.Z`) and tag the merged bump commit. |
+| CI: no CHANGELOG section | Add it in a `docs(changelog): record X.Y.Z` PR, then with approval delete the tag and tag the new merge commit. |
+| CI: a release already exists for the tag | A leftover draft: with approval, `gh release delete vX.Y.Z` (keeps the tag), then re-run via `workflow_dispatch` on the tag. |
+| Release PR closed without merge | Delete the branch; nothing was released. |
+| Libbox build, notarization, or other transient CI failure | `gh run view --log-failed`, fix the cause, delete any draft, and re-run via `workflow_dispatch` on the existing tag. |
+| Run passed but an asset is missing | Leave the draft; delete it, then re-run via `workflow_dispatch` on the tag. |
+| Feed did not update after publish | The release is a prerelease or still a draft, or lacks `appcast.xml`. Fix the release flags; never upload a hand-made appcast. |
+| Wrong version shipped | Supersede it with the next version. |
+| Published release is broken | Mark its header `## [X.Y.Z] - YYYY-MM-DD [YANKED]` with a one-line reason; ship the fix as a new version. |
 
-Before reporting "done":
-
-- [ ] `git tag --sort=-creatordate | head -1` shows the new tag.
-- [ ] `git log -1 --oneline origin/main` shows `chore(release): bump to X.Y.Z`.
-- [ ] `./scripts/bump-version.sh --print` shows `MARKETING_VERSION = X.Y.Z`.
-- [ ] `CHANGELOG.md` has `## [X.Y.Z] - YYYY-MM-DD` (non-empty) and a fresh empty `## [Unreleased]` above.
-- [ ] The GitHub Release `vX.Y.Z` is **not** prerelease and carries the DMG, its `.sha256`, and `appcast.xml`.
-- [ ] `curl …/releases/latest/download/appcast.xml` returns the new version.
-
-## Anti-patterns
-
-- ❌ Bumping `project.yml` and `CHANGELOG.md` in separate commits — keep the bump atomic.
-- ❌ `git add -A` / `git add -u` — stage only the release files.
-- ❌ Any attribution / Co-Authored-By trailer on the bump commit.
-- ❌ Lightweight tag — always annotated.
-- ❌ Pushing the tag before the commit.
-- ❌ Publishing as a **prerelease** — clients on the canonical feed won't see it.
-- ❌ Force-pushing `main` to "fix" a bad bump — roll forward instead.
-- ❌ Hand-editing `appcast.xml` — `generate_appcast` (via `release.sh appcast`) is the only writer.
-- ❌ Tagging before `make release` succeeds — prove the artifacts first.
+`appcast.xml` is written only by CI — never edit it by hand. The CI secrets
+(Developer ID certificate, provisioning profiles, notary API key, Sparkle
+key, tap token) are listed in `docs/RELEASE.md`.
