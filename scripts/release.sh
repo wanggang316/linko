@@ -156,6 +156,44 @@ cmd_dmg() {
   printf '%s\n' "${dmg_path}"
 }
 
+# Print the body of the `## [<version>]` section of CHANGELOG.md, without
+# its heading. Prints nothing when the section is missing.
+changelog_section() {
+  awk -v v="$1" '
+    index($0, "## [" v "]") == 1 { found = 1; next }
+    found && /^## \[/ { exit }
+    found { print }
+  ' "${srcroot}/CHANGELOG.md"
+}
+
+# generate_appcast writes only version metadata into the <item>. Add the
+# CHANGELOG section as Markdown release notes, so Sparkle's update dialog
+# shows what changed (sparkle:format="markdown" needs Sparkle 2.9+).
+inject_release_notes() {
+  local appcast="$1" version="$2" notes
+  notes="$(changelog_section "${version}")"
+  if [ -z "$(printf '%s' "${notes}" | tr -d '[:space:]')" ]; then
+    log "warning: CHANGELOG.md has no [${version}] section; appcast ships without release notes"
+    return
+  fi
+  RELEASE_NOTES="${notes}" /usr/bin/python3 - "${appcast}" <<'PY'
+import os, re, sys
+path = sys.argv[1]
+notes = os.environ["RELEASE_NOTES"].strip()
+# CDATA cannot hold a literal "]]>"; split it across two sections.
+notes = notes.replace("]]>", "]]]]><![CDATA[>")
+xml = open(path, encoding="utf-8").read()
+if "<description" in xml:
+    sys.exit("appcast already has a <description>; refusing to overwrite")
+block = ('            <description sparkle:format="markdown"><![CDATA[\n'
+         + notes + "\n            ]]></description>\n")
+xml, n = re.subn(r"(?m)^([ \t]*)</item>", lambda m: block + m.group(0), xml, count=1)
+if n != 1:
+    sys.exit("expected one </item> in appcast.xml, found %d" % n)
+open(path, "w", encoding="utf-8").write(xml)
+PY
+}
+
 cmd_appcast() {
   local version="${1:-$(read_marketing_version)}"
   local dmg_path="${release_dir}/Linko-${version}.dmg"
@@ -212,6 +250,7 @@ PY
 
   grep -q 'sparkle:edSignature=' "${feed_dir}/appcast.xml" \
     || die "failed to inject EdDSA signature into appcast"
+  inject_release_notes "${feed_dir}/appcast.xml" "${version}"
   /bin/cp "${feed_dir}/appcast.xml" "${release_dir}/appcast.xml"
   log "appcast: ${release_dir}/appcast.xml (signed)"
   printf '%s\n' "${release_dir}/appcast.xml"

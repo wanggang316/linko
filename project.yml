@@ -20,7 +20,7 @@ packages:
   # Sparkle 2 auto-update framework. App target ONLY — LinkoKit never links it.
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
-    from: 2.6.0
+    from: 2.9.0
 
 targets:
   LinkoApp:
