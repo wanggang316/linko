@@ -19,44 +19,34 @@ struct PolicyGroupsView: View {
     private var groups: [PolicyGroup] { appState.preferences.routing.groups }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-        }
-        .frame(width: 640, height: 560)
-        .sheet(item: $editingGroup) { group in
-            PolicyGroupEditorSheet(
-                group: group,
-                isNew: isCreating,
-                existingNames: groups.map(\.name),
-                nodeTags: nodeTags,
-                groupTags: groups.map(\.name)
-            ) { saved in
-                commit(saved, isNew: isCreating)
+        content
+            .navigationTitle("策略组")
+            .toolbar { toolbarContent }
+            .frame(minWidth: 560, minHeight: 420)
+            .sheet(item: $editingGroup) { group in
+                PolicyGroupEditorSheet(
+                    group: group,
+                    isNew: isCreating,
+                    existingNames: groups.map(\.name),
+                    nodeTags: nodeTags,
+                    groupTags: groups.map(\.name)
+                ) { saved in
+                    commit(saved, isNew: isCreating)
+                }
+                .environmentObject(appState)
             }
-            .environmentObject(appState)
-        }
     }
 
-    // MARK: - Header
+    // MARK: - Toolbar
 
-    private var header: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            SectionHeader("策略组", symbolName: "rectangle.3.group") {
-                CountBadge(count: groups.count)
-            }
-            Spacer(minLength: Theme.Spacing.xs)
-            Button {
-                beginCreate()
-            } label: {
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: beginCreate) {
                 Label("新建策略组", systemImage: "plus")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
+            .help("添加一个策略组")
         }
-        .padding(.horizontal, Theme.Spacing.lg)
-        .padding(.vertical, Theme.Spacing.md)
     }
 
     // MARK: - Content
