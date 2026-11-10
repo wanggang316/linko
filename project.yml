@@ -124,6 +124,9 @@ targets:
       # host-free tests (all system effects stay behind injected protocols).
       - path: apps/LinkoApp/Sources
       - path: apps/LinkoApp/Tests
+      # Image assets only (no code), so the tests can check that every asset
+      # the sources name is in the catalog.
+      - path: apps/LinkoApp/Assets.xcassets
     scheme:
       testTargets:
         - LinkoAppTests
